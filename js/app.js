@@ -27,7 +27,8 @@ function initCalendar() {
                 id: r.id,
                 title: r.menus.join(', '),
                 start: `${r.date}T${r.startTime}`,
-                end: calculateEndTimeISO(r.date, r.startTime, r.duration)
+                end: calculateEndTimeISO(r.date, r.startTime, r.duration),
+                backgroundColor: r.color || '#e67e22'
             }));
             successCallback(events);
         }
@@ -51,9 +52,9 @@ function backToCalendar() {
 
 async function renderTimeline(date) {
     const timeline = document.getElementById('reservation-timeline');
+    const indicator = document.getElementById('drag-time-indicator');
     timeline.innerHTML = '';
     
-    // 8:00 to 20:00 slots
     for (let h = 8; h <= 20; h++) {
         const slot = document.createElement('div');
         slot.className = 'timeline-slot';
@@ -77,19 +78,25 @@ async function renderTimeline(date) {
         block.className = 'reservation-block';
         block.style.top = `${top}px`;
         block.style.height = `${height}px`;
+        block.style.backgroundColor = r.color || '#e67e22';
         block.draggable = true;
         block.innerHTML = `
-            <strong>${r.startTime} - ${customer ? customer.name : '客'}</strong><br>
-            ${r.menus.join(', ')} (${r.price || 0}円)
+            <div style="display:flex; justify-content:space-between; align-items:start;">
+                <strong>${r.startTime} - ${customer ? customer.name : '客'}</strong>
+                <button onclick="editReservation(${r.id})" style="padding:2px 5px; font-size:10px; background:rgba(255,255,255,0.3); border:1px solid white;">編集</button>
+            </div>
+            <div style="font-size:0.9em;">${r.menus.join(', ')} (${r.price || 0}円)</div>
         `;
 
         block.addEventListener('dragstart', (e) => {
             e.dataTransfer.setData('text/plain', r.id);
             block.classList.add('dragging');
+            indicator.style.display = 'block';
         });
 
         block.addEventListener('dragend', () => {
             block.classList.remove('dragging');
+            indicator.style.display = 'none';
         });
 
         timeline.appendChild(block);
@@ -97,6 +104,16 @@ async function renderTimeline(date) {
 
     timeline.addEventListener('dragover', (e) => {
         e.preventDefault();
+        const rect = timeline.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+        const totalMinutes = Math.round(y / 5) * 5;
+        const h = Math.floor(totalMinutes / 60) + 8;
+        const m = totalMinutes % 60;
+        const timeStr = `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
+        
+        indicator.textContent = timeStr;
+        indicator.style.top = `${e.clientY - rect.top - 25}px`;
+        indicator.style.left = `${e.clientX - rect.left + 10}px`;
     });
 
     timeline.addEventListener('drop', async (e) => {
@@ -104,8 +121,6 @@ async function renderTimeline(date) {
         const id = parseInt(e.dataTransfer.getData('text/plain'));
         const rect = timeline.getBoundingClientRect();
         const y = e.clientY - rect.top;
-        
-        // 5分単位にスナップ
         const totalMinutes = Math.round(y / 5) * 5;
         const h = Math.floor(totalMinutes / 60) + 8;
         const m = totalMinutes % 60;
@@ -121,13 +136,42 @@ async function renderTimeline(date) {
     });
 }
 
+async function editReservation(id) {
+    const reservations = await getAllReservations();
+    const res = reservations.find(r => r.id === id);
+    if (!res) return;
+
+    document.getElementById('res-id').value = res.id;
+    document.getElementById('res-customer-id').value = res.customerId;
+    document.getElementById('res-start-time').value = res.startTime;
+    document.getElementById('res-price').value = res.price || 0;
+    document.getElementById('res-color').value = res.color || '#e67e22';
+    
+    // チェックボックスのリセットと設定
+    document.querySelectorAll('input[name="menu"]').forEach(cb => {
+        const menuLabel = cb.parentNode.textContent.trim();
+        cb.checked = res.menus.includes(menuLabel);
+    });
+    
+    const total = Array.from(document.querySelectorAll('input[name="menu"]:checked'))
+        .reduce((sum, cb) => sum + parseInt(cb.dataset.time), 0);
+    document.getElementById('res-total-time').textContent = total;
+
+    document.getElementById('reservation-modal').style.display = 'block';
+}
+
 function setupEventListeners() {
+    // 検索機能の強化（名前と電話番号）
+    document.getElementById('customer-search').addEventListener('input', (e) => {
+        renderCustomers(e.target.value);
+    });
+
     document.getElementById('customer-form').addEventListener('submit', async (e) => {
         e.preventDefault();
         const customer = {
             name: document.getElementById('cust-name').value,
             phone: document.getElementById('cust-phone').value,
-            note: document.getElementById('cust-note').value, // 箇条書き用
+            note: document.getElementById('cust-note').value,
             createdAt: new Date().toISOString()
         };
         await addCustomer(customer);
@@ -138,6 +182,7 @@ function setupEventListeners() {
 
     document.getElementById('reservation-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const id = document.getElementById('res-id').value;
         const checkboxes = document.querySelectorAll('input[name="menu"]:checked');
         const menus = Array.from(checkboxes).map(cb => cb.parentNode.textContent.trim());
         const totalMinutes = Array.from(checkboxes).reduce((sum, cb) => sum + parseInt(cb.dataset.time), 0);
@@ -149,14 +194,22 @@ function setupEventListeners() {
             duration: totalMinutes,
             menus: menus,
             price: parseInt(document.getElementById('res-price').value) || 0,
+            color: document.getElementById('res-color').value,
             interval: 5
         };
+
+        if (id) {
+            reservation.id = parseInt(id);
+            await updateReservation(reservation);
+        } else {
+            await addReservation(reservation);
+        }
         
-        await addReservation(reservation);
         closeModal('reservation-modal');
         renderTimeline(selectedDate);
-        renderCustomers(); // 来店日更新のため
+        renderCustomers();
         e.target.reset();
+        document.getElementById('res-id').value = '';
     });
 
     document.querySelectorAll('input[name="menu"]').forEach(cb => {
@@ -168,7 +221,7 @@ function setupEventListeners() {
     });
 }
 
-async function renderCustomers() {
+async function renderCustomers(filter = '') {
     const customers = await getAllCustomers();
     const reservations = await getAllReservations();
     const list = document.getElementById('customer-list');
@@ -177,7 +230,11 @@ async function renderCustomers() {
     list.innerHTML = '';
     select.innerHTML = '<option value="">顧客を選択してください</option>';
     
-    customers.forEach(c => {
+    const filteredCustomers = customers.filter(c => 
+        c.name.includes(filter) || (c.phone && c.phone.includes(filter))
+    );
+
+    filteredCustomers.forEach(c => {
         const customerRes = reservations.filter(r => r.customerId === c.id)
             .sort((a, b) => b.date.localeCompare(a.date));
         
@@ -188,7 +245,6 @@ async function renderCustomers() {
             daysAgoText = `<br><span class="days-ago">${diff}日前</span>`;
         }
 
-        // メモを箇条書きに変換
         const memoHtml = c.note ? `<ul class="memo-list">${c.note.split('\n').map(line => `<li>${line}</li>`).join('')}</ul>` : '';
 
         const tr = document.createElement('tr');
@@ -225,7 +281,10 @@ function showSection(sectionId) {
 }
 
 function openReservationModal() {
+    document.getElementById('res-id').value = '';
+    document.getElementById('reservation-form').reset();
     document.getElementById('res-start-time').value = "09:00";
+    document.getElementById('res-total-time').textContent = '0';
     document.getElementById('reservation-modal').style.display = 'block';
 }
 
