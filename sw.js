@@ -5,7 +5,8 @@ const ASSETS = [
   './css/style.css',
   './js/db.js',
   './js/app.js',
-  './manifest.json'
+  './manifest.json',
+  'https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'
 ];
 
 self.addEventListener('install', (event) => {

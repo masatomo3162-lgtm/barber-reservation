@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>理容室予約管理</title>
     <link rel="stylesheet" href="css/style.css">
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#2c3e50">
 </head>
@@ -21,13 +22,17 @@
     <main>
         <!-- 予約状況セクション -->
         <section id="calendar" class="active">
-            <h2>予約状況</h2>
-            <div class="controls">
-                <input type="date" id="calendar-date">
-                <button onclick="openReservationModal()">新規予約</button>
-            </div>
-            <div id="reservation-list">
-                <!-- 予約リストがここに表示される -->
+            <div id="calendar-view"></div>
+            <div id="day-view" style="display:none;">
+                <button onclick="backToCalendar()">← カレンダーに戻る</button>
+                <h2 id="selected-date-display"></h2>
+                <div class="controls">
+                    <button onclick="openReservationModal()">新規予約</button>
+                    <button onclick="openCustomerModal()">新規顧客登録</button>
+                </div>
+                <div id="reservation-timeline" style="position:relative; height: 1200px; background: #eee; border: 1px solid #ccc; margin-top: 20px;">
+                    <!-- タイムラインがここに表示される -->
+                </div>
             </div>
         </section>
 
@@ -97,7 +102,16 @@
                         <label><input type="checkbox" name="menu" value="shampoo" data-time="15"> シャンプー (15分)</label>
                         <label><input type="checkbox" name="menu" value="color" data-time="60"> カラーリング (60分)</label>
                         <label><input type="checkbox" name="menu" value="perm" data-time="90"> パーマ (90分)</label>
+                        <label><input type="checkbox" name="menu" value="ear" data-time="10"> 耳掃除 (10分)</label>
+                        <label><input type="checkbox" name="menu" value="grey" data-time="20"> 白髪ぼかし (20分)</label>
+                        <label><input type="checkbox" name="menu" value="w_cut" data-time="25"> 女性カット (25分)</label>
+                        <label><input type="checkbox" name="menu" value="w_shave" data-time="30"> 女性顔そり (30分)</label>
+                        <label><input type="checkbox" name="menu" value="straight" data-time="180"> 縮毛矯正 (180分)</label>
                     </div>
+                </div>
+                <div class="form-group">
+                    <label>料金 (円):</label>
+                    <input type="number" id="res-price" placeholder="0">
                 </div>
                 <div class="form-group">
                     <label>合計時間: <span id="res-total-time">0</span> 分 (+ 5分休憩)</label>

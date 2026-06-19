@@ -72,3 +72,12 @@ async function deleteReservation(id) {
         request.onsuccess = () => resolve();
     });
 }
+
+async function updateReservation(reservation) {
+    return new Promise((resolve) => {
+        const transaction = db.transaction(['reservations'], 'readwrite');
+        const store = transaction.objectStore('reservations');
+        const request = store.put(reservation);
+        request.onsuccess = () => resolve(request.result);
+    });
+}
