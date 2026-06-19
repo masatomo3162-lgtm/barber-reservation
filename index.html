@@ -24,14 +24,17 @@
         <section id="calendar" class="active">
             <div id="calendar-view"></div>
             <div id="day-view" style="display:none;">
-                <button onclick="backToCalendar()">← カレンダーに戻る</button>
-                <h2 id="selected-date-display"></h2>
-                <div class="controls">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <button onclick="backToCalendar()">← 戻る</button>
+                    <h2 id="selected-date-display" style="margin:0;"></h2>
+                    <div></div>
+                </div>
+                <div class="controls" style="margin-top:10px;">
                     <button onclick="openReservationModal()">新規予約</button>
                     <button onclick="openCustomerModal()">新規顧客登録</button>
                 </div>
                 <div id="drag-time-indicator" style="display:none; position:absolute; background:rgba(0,0,0,0.7); color:white; padding:2px 5px; border-radius:3px; z-index:100; pointer-events:none; font-size:12px;"></div>
-                <div id="reservation-timeline" style="position:relative; height: 1200px; background: #eee; border: 1px solid #ccc; margin-top: 20px;">
+                <div id="reservation-timeline" style="position:relative; height: 1200px; background: #eee; border: 1px solid #ccc; margin-top: 20px; overflow-y: auto;">
                     <!-- タイムラインがここに表示される -->
                 </div>
             </div>
@@ -130,8 +133,9 @@
     <div id="customer-modal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeModal('customer-modal')">&times;</span>
-            <h3>顧客登録</h3>
+            <h3 id="customer-modal-title">顧客登録</h3>
             <form id="customer-form">
+                <input type="hidden" id="cust-id">
                 <div class="form-group">
                     <label>名前:</label>
                     <input type="text" id="cust-name" required>
@@ -142,10 +146,31 @@
                 </div>
                 <div class="form-group">
                     <label>メモ:</label>
-                    <textarea id="cust-note"></textarea>
+                    <textarea id="cust-note" rows="5" placeholder="改行で箇条書きになります"></textarea>
                 </div>
-                <button type="submit">登録</button>
+                <div style="display:flex; gap:10px;">
+                    <button type="submit" id="cust-submit-btn">登録</button>
+                    <button type="button" id="cust-delete-btn" style="background:#e74c3c; display:none;" onclick="handleCustomerDeleteFromModal()">削除</button>
+                </div>
             </form>
+        </div>
+    </div>
+
+    <!-- 顧客詳細モーダル -->
+    <div id="customer-detail-modal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <span class="close" onclick="closeModal('customer-detail-modal')">&times;</span>
+            <h3 id="detail-cust-name">顧客詳細</h3>
+            <div id="detail-cust-info" style="margin-bottom:20px; padding:10px; background:#f9f9f9; border-radius:5px;">
+                <!-- 電話番号など -->
+            </div>
+            <h4>施術履歴</h4>
+            <div id="detail-reservation-history" style="max-height: 300px; overflow-y: auto; border: 1px solid #eee; padding: 10px;">
+                <!-- 履歴リスト -->
+            </div>
+            <div style="margin-top:20px;">
+                <button onclick="openCustomerEditFromDetail()">情報を編集する</button>
+            </div>
         </div>
     </div>
 

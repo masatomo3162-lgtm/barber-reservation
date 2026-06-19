@@ -1,5 +1,6 @@
 let calendar;
 let selectedDate = new Date().toISOString().split('T')[0];
+let currentDetailCustomerId = null;
 
 document.addEventListener('DOMContentLoaded', async () => {
     await initDB();
@@ -16,10 +17,31 @@ function initCalendar() {
         headerToolbar: {
             left: 'prev,next today',
             center: 'title',
-            right: 'dayGridMonth,timeGridWeek'
+            right: 'dayGridMonth,timeGridOneWeek'
         },
+        views: {
+            timeGridOneWeek: {
+                type: 'timeGrid',
+                duration: { days: 7 },
+                buttonText: 'WEEK',
+                // 今日から表示するように設定
+                visibleRange: function(currentDate) {
+                    return {
+                        start: currentDate,
+                        end: new Date(currentDate.valueOf() + 7 * 24 * 60 * 60 * 1000)
+                    };
+                }
+            }
+        },
+        // 高速化のための設定
+        lazyFetching: true,
+        dayMaxEvents: true,
         dateClick: function(info) {
             openDayView(info.dateStr);
+        },
+        eventClick: function(info) {
+            const date = info.event.startStr.split('T')[0];
+            openDayView(date);
         },
         events: async function(fetchInfo, successCallback, failureCallback) {
             const reservations = await getAllReservations();
@@ -29,7 +51,7 @@ function initCalendar() {
                 start: `${r.date}T${r.startTime}`,
                 end: calculateEndTimeISO(r.date, r.startTime, r.duration),
                 backgroundColor: r.color || '#e67e22',
-                textColor: '#333' // パステルカラーで見やすくするため黒系文字に
+                textColor: '#333'
             }));
             successCallback(events);
         }
@@ -85,7 +107,7 @@ async function renderTimeline(date) {
         block.style.top = `${top}px`;
         block.style.height = `${height}px`;
         block.style.backgroundColor = r.color || getRandomPastelColor();
-        block.style.color = '#333'; // パステルカラー用
+        block.style.color = '#333';
         block.draggable = true;
         block.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:start;">
@@ -138,6 +160,7 @@ async function renderTimeline(date) {
         if (res) {
             res.startTime = newStartTime;
             await updateReservation(res);
+            autoBackup(); // 自動バックアップ
             renderTimeline(date);
         }
     });
@@ -153,7 +176,6 @@ async function editReservation(id) {
     document.getElementById('res-customer-id').value = res.customerId;
     document.getElementById('res-start-time').value = res.startTime;
     document.getElementById('res-price').value = res.price || 0;
-    
     document.getElementById('res-delete-btn').style.display = 'inline-block';
     
     document.querySelectorAll('input[name="menu"]').forEach(cb => {
@@ -161,17 +183,21 @@ async function editReservation(id) {
         cb.checked = res.menus.includes(menuLabel);
     });
     
-    const total = Array.from(document.querySelectorAll('input[name="menu"]:checked'))
-        .reduce((sum, cb) => sum + parseInt(cb.dataset.time), 0);
-    document.getElementById('res-total-time').textContent = total;
-
+    updateTotalTime();
     document.getElementById('reservation-modal').style.display = 'block';
+}
+
+function updateTotalTime() {
+    const checkboxes = document.querySelectorAll('input[name="menu"]:checked');
+    const total = Array.from(checkboxes).reduce((sum, cb) => sum + parseInt(cb.dataset.time), 0);
+    document.getElementById('res-total-time').textContent = total;
 }
 
 async function handleReservationDeleteFromModal() {
     const id = parseInt(document.getElementById('res-id').value);
     if (id && confirm('この予約を取り消しますか？')) {
         await deleteReservation(id);
+        autoBackup();
         closeModal('reservation-modal');
         renderTimeline(selectedDate);
         calendar.refetchEvents();
@@ -185,15 +211,26 @@ function setupEventListeners() {
 
     document.getElementById('customer-form').addEventListener('submit', async (e) => {
         e.preventDefault();
+        const id = document.getElementById('cust-id').value;
         const customer = {
             name: document.getElementById('cust-name').value,
             phone: document.getElementById('cust-phone').value,
             note: document.getElementById('cust-note').value,
-            createdAt: new Date().toISOString()
+            updatedAt: new Date().toISOString()
         };
-        await addCustomer(customer);
+
+        if (id) {
+            customer.id = parseInt(id);
+            await updateCustomer(customer);
+        } else {
+            customer.createdAt = new Date().toISOString();
+            await addCustomer(customer);
+        }
+        
+        autoBackup();
         closeModal('customer-modal');
         renderCustomers();
+        if (currentDetailCustomerId) showCustomerDetail(currentDetailCustomerId);
         e.target.reset();
     });
 
@@ -218,13 +255,14 @@ function setupEventListeners() {
             const reservations = await getAllReservations();
             const existing = reservations.find(r => r.id === parseInt(id));
             reservationData.id = parseInt(id);
-            reservationData.color = existing.color; // 既存の色を維持
+            reservationData.color = existing.color;
             await updateReservation(reservationData);
         } else {
-            reservationData.color = getRandomPastelColor(); // 新規はランダム
+            reservationData.color = getRandomPastelColor();
             await addReservation(reservationData);
         }
         
+        autoBackup();
         closeModal('reservation-modal');
         renderTimeline(selectedDate);
         renderCustomers();
@@ -233,11 +271,7 @@ function setupEventListeners() {
     });
 
     document.querySelectorAll('input[name="menu"]').forEach(cb => {
-        cb.addEventListener('change', () => {
-            const checkboxes = document.querySelectorAll('input[name="menu"]:checked');
-            const total = Array.from(checkboxes).reduce((sum, cb) => sum + parseInt(cb.dataset.time), 0);
-            document.getElementById('res-total-time').textContent = total;
-        });
+        cb.addEventListener('change', updateTotalTime);
     });
 }
 
@@ -265,15 +299,13 @@ async function renderCustomers(filter = '') {
             daysAgoText = `<br><span class="days-ago">${diff}日前</span>`;
         }
 
-        const memoHtml = c.note ? `<ul class="memo-list">${c.note.split('\n').map(line => `<li>${line}</li>`).join('')}</ul>` : '';
-
         const tr = document.createElement('tr');
         tr.innerHTML = `
-            <td><strong>${c.name}</strong>${memoHtml}</td>
+            <td><a href="#" onclick="showCustomerDetail(${c.id}); return false;" style="color:var(--primary-color); font-weight:bold; text-decoration:none;">${c.name}</a></td>
             <td>${c.phone}</td>
             <td>${lastVisit}${daysAgoText}</td>
             <td>
-                <button onclick="deleteCustomer(${c.id})" style="background:#e74c3c">削除</button>
+                <button onclick="openCustomerEdit(${c.id})" style="background:#3498db; padding:5px 10px; font-size:12px;">編集</button>
             </td>
         `;
         list.appendChild(tr);
@@ -283,6 +315,69 @@ async function renderCustomers(filter = '') {
         opt.textContent = c.name;
         select.appendChild(opt);
     });
+}
+
+async function showCustomerDetail(id) {
+    currentDetailCustomerId = id;
+    const customers = await getAllCustomers();
+    const reservations = await getAllReservations();
+    const customer = customers.find(c => c.id === id);
+    if (!customer) return;
+
+    document.getElementById('detail-cust-name').textContent = customer.name;
+    document.getElementById('detail-cust-info').innerHTML = `
+        <div><strong>電話番号:</strong> ${customer.phone || 'なし'}</div>
+        <div style="margin-top:10px;"><strong>メモ:</strong></div>
+        <ul class="memo-list">${customer.note ? customer.note.split('\n').map(line => `<li>${line}</li>`).join('') : 'なし'}</ul>
+    `;
+
+    const history = reservations.filter(r => r.customerId === id)
+        .sort((a, b) => b.date.localeCompare(a.date));
+    
+    const historyList = document.getElementById('detail-reservation-history');
+    historyList.innerHTML = history.length > 0 ? '' : '履歴はありません。';
+    
+    history.forEach(r => {
+        const div = document.createElement('div');
+        div.className = 'customer-history-item';
+        div.innerHTML = `
+            <div style="font-weight:bold;">${r.date} ${r.startTime}</div>
+            <div style="font-size:0.9em;">メニュー: ${r.menus.join(', ')}</div>
+            <div style="font-size:0.9em; color:#666;">料金: ${r.price || 0}円</div>
+        `;
+        historyList.appendChild(div);
+    });
+
+    document.getElementById('customer-detail-modal').style.display = 'block';
+}
+
+async function openCustomerEdit(id) {
+    const customers = await getAllCustomers();
+    const customer = customers.find(c => c.id === id);
+    if (!customer) return;
+
+    document.getElementById('customer-modal-title').textContent = '顧客情報編集';
+    document.getElementById('cust-id').value = customer.id;
+    document.getElementById('cust-name').value = customer.name;
+    document.getElementById('cust-phone').value = customer.phone || '';
+    document.getElementById('cust-note').value = customer.note || '';
+    document.getElementById('cust-delete-btn').style.display = 'inline-block';
+    document.getElementById('customer-modal').style.display = 'block';
+}
+
+function openCustomerEditFromDetail() {
+    closeModal('customer-detail-modal');
+    openCustomerEdit(currentDetailCustomerId);
+}
+
+async function handleCustomerDeleteFromModal() {
+    const id = parseInt(document.getElementById('cust-id').value);
+    if (id && confirm('顧客情報を削除しますか？（予約履歴は残ります）')) {
+        await deleteCustomer(id);
+        autoBackup();
+        closeModal('customer-modal');
+        renderCustomers();
+    }
 }
 
 function calculateEndTimeISO(date, start, duration) {
@@ -311,6 +406,10 @@ function openReservationModal() {
 }
 
 function openCustomerModal() {
+    document.getElementById('customer-modal-title').textContent = '新規顧客登録';
+    document.getElementById('cust-id').value = '';
+    document.getElementById('customer-form').reset();
+    document.getElementById('cust-delete-btn').style.display = 'none';
     document.getElementById('customer-modal').style.display = 'block';
 }
 
@@ -319,12 +418,18 @@ function closeModal(id) {
 }
 
 async function deleteCustomer(id) {
-    if (confirm('顧客情報を削除しますか？（予約履歴は残ります）')) {
-        const transaction = db.transaction(['customers'], 'readwrite');
-        const store = transaction.objectStore('customers');
-        await store.delete(id);
-        renderCustomers();
-    }
+    const transaction = db.transaction(['customers'], 'readwrite');
+    const store = transaction.objectStore('customers');
+    await store.delete(id);
+}
+
+// 自動バックアップ機能
+async function autoBackup() {
+    const reservations = await getAllReservations();
+    const customers = await getAllCustomers();
+    const data = { reservations, customers, timestamp: new Date().toISOString() };
+    localStorage.setItem('barber_auto_backup', JSON.stringify(data));
+    console.log('Auto-backup saved to LocalStorage');
 }
 
 async function exportToCSV() {

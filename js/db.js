@@ -46,6 +46,15 @@ async function addCustomer(customer) {
     });
 }
 
+async function updateCustomer(customer) {
+    return new Promise((resolve) => {
+        const transaction = db.transaction(['customers'], 'readwrite');
+        const store = transaction.objectStore('customers');
+        const request = store.put(customer);
+        request.onsuccess = () => resolve(request.result);
+    });
+}
+
 async function getAllReservations() {
     return new Promise((resolve) => {
         const transaction = db.transaction(['reservations'], 'readonly');
