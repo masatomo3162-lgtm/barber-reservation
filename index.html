@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>理容室予約管理</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#2c3e50">
+</head>
+<body>
+    <header>
+        <h1>理容室予約管理</h1>
+        <nav>
+            <button onclick="showSection('calendar')">予約状況</button>
+            <button onclick="showSection('customers')">顧客管理</button>
+            <button onclick="showSection('settings')">設定・出力</button>
+        </nav>
+    </header>
+
+    <main>
+        <!-- 予約状況セクション -->
+        <section id="calendar" class="active">
+            <h2>予約状況</h2>
+            <div class="controls">
+                <input type="date" id="calendar-date">
+                <button onclick="openReservationModal()">新規予約</button>
+            </div>
+            <div id="reservation-list">
+                <!-- 予約リストがここに表示される -->
+            </div>
+        </section>
+
+        <!-- 顧客管理セクション -->
+        <section id="customers">
+            <h2>顧客管理</h2>
+            <div class="controls">
+                <input type="text" id="customer-search" placeholder="名前で検索...">
+                <button onclick="openCustomerModal()">新規顧客登録</button>
+            </div>
+            <table id="customer-table">
+                <thead>
+                    <tr>
+                        <th>名前</th>
+                        <th>電話番号</th>
+                        <th>最終来店日</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="customer-list">
+                    <!-- 顧客リストがここに表示される -->
+                </tbody>
+            </table>
+        </section>
+
+        <!-- 設定・出力セクション -->
+        <section id="settings">
+            <h2>設定・バックアップ</h2>
+            <div class="card">
+                <h3>データバックアップ</h3>
+                <p>現在のデータをCSV形式で書き出します。iCloud Drive等に保存してください。</p>
+                <button onclick="exportToCSV()">CSVエクスポート</button>
+            </div>
+            <div class="card">
+                <h3>施術メニュー設定（確認用）</h3>
+                <ul>
+                    <li>カット: 25分</li>
+                    <li>シェービング: 15分</li>
+                    <li>シャンプー: 15分</li>
+                    <li>カラーリング: 60分</li>
+                    <li>パーマ: 90分</li>
+                    <li>インターバル: 5分</li>
+                </ul>
+            </div>
+        </section>
+    </main>
+
+    <!-- 予約登録モーダル -->
+    <div id="reservation-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('reservation-modal')">&times;</span>
+            <h3>新規予約登録</h3>
+            <form id="reservation-form">
+                <div class="form-group">
+                    <label>顧客選択:</label>
+                    <select id="res-customer-id" required></select>
+                </div>
+                <div class="form-group">
+                    <label>開始時間:</label>
+                    <input type="time" id="res-start-time" required>
+                </div>
+                <div class="form-group">
+                    <label>メニュー（複数選択可）:</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="menu" value="cut" data-time="25"> カット (25分)</label>
+                        <label><input type="checkbox" name="menu" value="shaving" data-time="15"> シェービング (15分)</label>
+                        <label><input type="checkbox" name="menu" value="shampoo" data-time="15"> シャンプー (15分)</label>
+                        <label><input type="checkbox" name="menu" value="color" data-time="60"> カラーリング (60分)</label>
+                        <label><input type="checkbox" name="menu" value="perm" data-time="90"> パーマ (90分)</label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>合計時間: <span id="res-total-time">0</span> 分 (+ 5分休憩)</label>
+                </div>
+                <button type="submit">予約を保存</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- 顧客登録モーダル -->
+    <div id="customer-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('customer-modal')">&times;</span>
+            <h3>顧客登録</h3>
+            <form id="customer-form">
+                <div class="form-group">
+                    <label>名前:</label>
+                    <input type="text" id="cust-name" required>
+                </div>
+                <div class="form-group">
+                    <label>電話番号:</label>
+                    <input type="tel" id="cust-phone">
+                </div>
+                <div class="form-group">
+                    <label>メモ:</label>
+                    <textarea id="cust-note"></textarea>
+                </div>
+                <button type="submit">登録</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/db.js"></script>
+    <script src="js/app.js"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js');
+            });
+        }
+    </script>
+</body>
+</html>
