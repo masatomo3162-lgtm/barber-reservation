@@ -28,12 +28,18 @@ function initCalendar() {
                 title: r.menus.join(', '),
                 start: `${r.date}T${r.startTime}`,
                 end: calculateEndTimeISO(r.date, r.startTime, r.duration),
-                backgroundColor: r.color || '#e67e22'
+                backgroundColor: r.color || '#e67e22',
+                textColor: '#333' // パステルカラーで見やすくするため黒系文字に
             }));
             successCallback(events);
         }
     });
     calendar.render();
+}
+
+function getRandomPastelColor() {
+    const hue = Math.floor(Math.random() * 360);
+    return `hsl(${hue}, 70%, 85%)`;
 }
 
 function openDayView(date) {
@@ -78,12 +84,13 @@ async function renderTimeline(date) {
         block.className = 'reservation-block';
         block.style.top = `${top}px`;
         block.style.height = `${height}px`;
-        block.style.backgroundColor = r.color || '#e67e22';
+        block.style.backgroundColor = r.color || getRandomPastelColor();
+        block.style.color = '#333'; // パステルカラー用
         block.draggable = true;
         block.innerHTML = `
             <div style="display:flex; justify-content:space-between; align-items:start;">
                 <strong>${r.startTime} - ${customer ? customer.name : '客'}</strong>
-                <button onclick="editReservation(${r.id})" style="padding:2px 5px; font-size:10px; background:rgba(255,255,255,0.3); border:1px solid white;">編集</button>
+                <button onclick="editReservation(${r.id})" style="padding:2px 5px; font-size:10px; background:rgba(255,255,255,0.5); border:1px solid #999; color:#333; cursor:pointer;">編集</button>
             </div>
             <div style="font-size:0.9em;">${r.menus.join(', ')} (${r.price || 0}円)</div>
         `;
@@ -141,13 +148,14 @@ async function editReservation(id) {
     const res = reservations.find(r => r.id === id);
     if (!res) return;
 
+    document.getElementById('reservation-modal-title').textContent = '予約変更登録';
     document.getElementById('res-id').value = res.id;
     document.getElementById('res-customer-id').value = res.customerId;
     document.getElementById('res-start-time').value = res.startTime;
     document.getElementById('res-price').value = res.price || 0;
-    document.getElementById('res-color').value = res.color || '#e67e22';
     
-    // チェックボックスのリセットと設定
+    document.getElementById('res-delete-btn').style.display = 'inline-block';
+    
     document.querySelectorAll('input[name="menu"]').forEach(cb => {
         const menuLabel = cb.parentNode.textContent.trim();
         cb.checked = res.menus.includes(menuLabel);
@@ -160,8 +168,17 @@ async function editReservation(id) {
     document.getElementById('reservation-modal').style.display = 'block';
 }
 
+async function handleReservationDeleteFromModal() {
+    const id = parseInt(document.getElementById('res-id').value);
+    if (id && confirm('この予約を取り消しますか？')) {
+        await deleteReservation(id);
+        closeModal('reservation-modal');
+        renderTimeline(selectedDate);
+        calendar.refetchEvents();
+    }
+}
+
 function setupEventListeners() {
-    // 検索機能の強化（名前と電話番号）
     document.getElementById('customer-search').addEventListener('input', (e) => {
         renderCustomers(e.target.value);
     });
@@ -187,22 +204,25 @@ function setupEventListeners() {
         const menus = Array.from(checkboxes).map(cb => cb.parentNode.textContent.trim());
         const totalMinutes = Array.from(checkboxes).reduce((sum, cb) => sum + parseInt(cb.dataset.time), 0);
         
-        const reservation = {
+        const reservationData = {
             customerId: parseInt(document.getElementById('res-customer-id').value),
             date: selectedDate,
             startTime: document.getElementById('res-start-time').value,
             duration: totalMinutes,
             menus: menus,
             price: parseInt(document.getElementById('res-price').value) || 0,
-            color: document.getElementById('res-color').value,
             interval: 5
         };
 
         if (id) {
-            reservation.id = parseInt(id);
-            await updateReservation(reservation);
+            const reservations = await getAllReservations();
+            const existing = reservations.find(r => r.id === parseInt(id));
+            reservationData.id = parseInt(id);
+            reservationData.color = existing.color; // 既存の色を維持
+            await updateReservation(reservationData);
         } else {
-            await addReservation(reservation);
+            reservationData.color = getRandomPastelColor(); // 新規はランダム
+            await addReservation(reservationData);
         }
         
         closeModal('reservation-modal');
@@ -281,10 +301,12 @@ function showSection(sectionId) {
 }
 
 function openReservationModal() {
+    document.getElementById('reservation-modal-title').textContent = '新規予約登録';
     document.getElementById('res-id').value = '';
     document.getElementById('reservation-form').reset();
     document.getElementById('res-start-time').value = "09:00";
     document.getElementById('res-total-time').textContent = '0';
+    document.getElementById('res-delete-btn').style.display = 'none';
     document.getElementById('reservation-modal').style.display = 'block';
 }
 

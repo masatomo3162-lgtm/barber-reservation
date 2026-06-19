@@ -85,7 +85,7 @@
     <div id="reservation-modal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeModal('reservation-modal')">&times;</span>
-            <h3>新規予約登録</h3>
+            <h3 id="reservation-modal-title">新規予約登録</h3>
             <form id="reservation-form">
                 <div class="form-group">
                     <label>顧客選択:</label>
@@ -114,15 +114,14 @@
                     <label>料金 (円):</label>
                     <input type="number" id="res-price" placeholder="0">
                 </div>
-                <div class="form-group">
-                    <label>表示カラー:</label>
-                    <input type="color" id="res-color" value="#e67e22">
-                </div>
                 <input type="hidden" id="res-id">
                 <div class="form-group">
                     <label>合計時間: <span id="res-total-time">0</span> 分 (+ 5分休憩)</label>
                 </div>
-                <button type="submit">予約を保存</button>
+                <div style="display:flex; gap:10px;">
+                    <button type="submit" id="res-submit-btn">予約を保存</button>
+                    <button type="button" id="res-delete-btn" style="background:#e74c3c; display:none;" onclick="handleReservationDeleteFromModal()">予約を取り消す</button>
+                </div>
             </form>
         </div>
     </div>
