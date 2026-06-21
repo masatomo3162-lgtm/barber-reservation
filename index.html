@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>理容室予約管理</title>
+<script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1a1a2e">
+<style>
+:root {
+  --bg: #f5f4f0;
+  --surface: #ffffff;
+  --card: #fafaf8;
+  --border: #e2e0d8;
+  --border2: #ccc9be;
+  --accent: #c8782a;
+  --accent-light: #fdf0e3;
+  --primary: #1a1a2e;
+  --text: #1a1a2e;
+  --muted: #888680;
+  --red: #c0392b;
+  --green: #27ae60;
+  --radius: 10px;
+  --PX: 3px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Hiragino Kaku Gothic ProN','Meiryo',system-ui,sans-serif; background: var(--bg); color: var(--text); font-size: 14px; }
+
+/* HEADER */
+header {
+  background: var(--primary);
+  color: white;
+  padding: 0 16px;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky; top: 0; z-index: 200;
+}
+.header-title { font-size: 16px; font-weight: 700; letter-spacing: 0.05em; white-space: nowrap; }
+nav { display: flex; gap: 3px; }
+nav button {
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.25);
+  color: rgba(255,255,255,0.8);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+nav button:hover, nav button.active { background: var(--accent); border-color: var(--accent); color: white; }
+
+main { padding: 14px; max-width: 1100px; margin: 0 auto; }
+section { display: none; }
+section.active { display: block; }
+
+/* CALENDAR */
+#calendar-view { background: white; border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; }
+.fc-toolbar-title { font-size: 15px !important; }
+.fc-button { background: var(--accent) !important; border-color: var(--accent) !important; font-size: 11px !important; padding: 4px 8px !important; }
+.fc-button:focus { box-shadow: none !important; }
+.fc-day-today { background: #fff8f0 !important; }
+.fc-event { border-radius: 3px !important; font-size: 11px !important; cursor: pointer !important; }
+.fc-timegrid-slot { height: 24px !important; }
+.fc-timegrid-slot-label { font-size: 11px !important; }
+
+/* TODAY PANEL */
+.today-panel {
+  background: var(--surface);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.today-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.today-panel-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.today-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.today-list-item:last-child { border-bottom: none; }
+.today-list-item:hover { opacity: 0.8; }
+.today-color-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.today-time { font-weight: 700; font-size: 13px; min-width: 90px; }
+.today-name { font-weight: 700; font-size: 14px; }
+.today-menu { font-size: 12px; color: var(--muted); }
+.today-price { font-size: 12px; color: var(--accent); font-weight: 700; }
+.today-empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+
+/* DAY VIEW HEADER */
+.day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.day-title { font-size: 17px; font-weight: 700; }
+.day-weekday { font-size: 12px; color: var(--muted); margin-left: 6px; }
+.day-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* TIMELINE */
+.timeline-container { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+.timeline-scroll { overflow-y: auto; position: relative; height: calc(720px * var(--PX) + 40px); max-height: 72vh; }
+.timeline-inner { position: relative; height: calc(720px * var(--PX)); }
+.time-labels { position: absolute; left: 0; top: 0; width: 52px; height: 100%; border-right: 1px solid var(--border); background: var(--card); z-index: 10; }
+.time-label { position: absolute; left: 0; width: 52px; text-align: right; padding-right: 8px; font-size: 11px; color: var(--muted); font-weight: 700; line-height: 1; transform: translateY(-50%); }
+.grid-lines { position: absolute; left: 52px; right: 0; top: 0; height: 100%; pointer-events: none; }
+.grid-line { position: absolute; left: 0; right: 0; height: 0; }
+.grid-line.hour { border-top: 1px solid #d0cdc5; }
+.grid-line.half { border-top: 1px dashed #e2e0d8; }
+.grid-line.ten  { border-top: 1px dotted #eeece6; }
+.reservations-area { position: absolute; left: 52px; right: 0; top: 0; height: 100%; }
+.res-block { position: absolute; left: 4px; right: 4px; border-radius: 6px; padding: 4px 7px; font-size: 12px; overflow: hidden; cursor: pointer; border-left: 3px solid rgba(0,0,0,0.25); transition: filter 0.1s; z-index: 5; }
+.res-block:hover { filter: brightness(0.92); }
+.res-block.dragging { opacity: 0.4; z-index: 20; }
+.res-block-name { font-weight: 700; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.res-block-menu { font-size: 11px; opacity: 0.85; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.res-block-time { font-size: 10px; opacity: 0.75; }
+
+/* WEEK VIEW */
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.week-col {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 120px;
+}
+.week-col.today-col { border-color: var(--accent); border-width: 2px; }
+.week-col-header {
+  padding: 8px 6px 6px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+.week-col-day { font-size: 11px; color: var(--muted); }
+.week-col-date { font-size: 18px; font-weight: 700; line-height: 1.2; }
+.week-col.today-col .week-col-date { color: var(--accent); }
+.week-col-sun .week-col-date { color: #c0392b; }
+.week-col-sat .week-col-date { color: #2980b9; }
+.week-col-body { padding: 4px; }
+.week-res-item {
+  border-radius: 4px;
+  padding: 3px 5px;
+  margin-bottom: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  color: white;
+  line-height: 1.3;
+  transition: opacity 0.1s;
+}
+.week-res-item:hover { opacity: 0.82; }
+.week-res-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.week-res-time { opacity: 0.85; font-size: 10px; }
+
+/* DRAG INDICATOR */
+.drag-indicator { display: none; position: fixed; background: var(--primary); color: white; padding: 3px 8px; border-radius: 5px; font-size: 12px; font-weight: 700; pointer-events: none; z-index: 300; }
+
+/* BUTTONS */
+.btn { padding: 9px 18px; border: none; border-radius: 7px; font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: opacity 0.15s; }
+.btn:hover { opacity: 0.88; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-secondary { background: var(--card); color: var(--text); border: 1px solid var(--border2); }
+.btn-danger { background: var(--red); color: white; }
+.btn-success { background: var(--green); color: white; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-back { background: transparent; color: var(--primary); border: 1px solid var(--border2); }
+
+/* CUSTOMERS */
+.controls { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 10px; flex-wrap: wrap; }
+.search-input { flex: 1; min-width: 160px; max-width: 300px; padding: 8px 12px; border: 1px solid var(--border2); border-radius: 7px; font-family: inherit; font-size: 14px; background: white; outline: none; }
+.search-input:focus { border-color: var(--accent); }
+table { width: 100%; border-collapse: collapse; background: white; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+th { background: var(--card); padding: 10px 14px; text-align: left; font-size: 12px; font-weight: 700; color: var(--muted); border-bottom: 1px solid var(--border); }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--accent-light); }
+.days-ago { font-size: 11px; color: var(--accent); font-weight: 700; display: block; }
+
+/* MODAL */
+.modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 500; align-items: center; justify-content: center; padding: 16px; }
+.modal-backdrop.open { display: flex; }
+.modal-box { background: white; border-radius: 14px; width: 100%; max-width: 480px; max-height: 92vh; overflow-y: auto; padding: 22px; position: relative; }
+.modal-title { font-size: 17px; font-weight: 700; margin-bottom: 16px; padding-right: 32px; }
+.modal-close { position: absolute; top: 14px; right: 14px; width: 28px; height: 28px; border: none; background: var(--card); border-radius: 50%; font-size: 16px; cursor: pointer; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+
+/* RESERVATION DETAIL MODAL */
+.res-detail-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.res-detail-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+.res-detail-name { font-size: 20px; font-weight: 700; }
+.res-detail-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.res-detail-row:last-of-type { border-bottom: none; }
+.res-detail-label { color: var(--muted); font-size: 12px; }
+
+/* FORM */
+.form-group { margin-bottom: 14px; }
+.form-label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 5px; }
+.form-input, .form-select, .form-textarea { width: 100%; padding: 9px 12px; border: 1px solid var(--border2); border-radius: 7px; font-family: inherit; font-size: 14px; background: white; outline: none; transition: border-color 0.15s; }
+.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); }
+.menu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.menu-item { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; transition: all 0.15s; background: var(--card); }
+.menu-item:hover { border-color: var(--accent); }
+.menu-item.checked { background: var(--accent-light); border-color: var(--accent); }
+.menu-item input { display: none; }
+.menu-item-name { font-size: 13px; font-weight: 700; }
+.menu-item-time { font-size: 11px; color: var(--muted); }
+.total-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-light); border: 1px solid var(--accent); border-radius: 7px; padding: 8px 14px; font-size: 14px; font-weight: 700; color: var(--accent); }
+
+/* SETTINGS */
+.card { background: white; border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 14px; }
+.card h3 { font-size: 15px; margin-bottom: 10px; }
+.card p { font-size: 13px; color: var(--muted); margin-bottom: 12px; line-height: 1.6; }
+.csv-format { background: var(--card); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; font-size: 11px; font-family: monospace; color: var(--muted); line-height: 1.8; overflow-x: auto; margin-top: 10px; }
+
+/* HISTORY */
+.history-item { padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.history-item:last-child { border-bottom: none; }
+.history-date { font-weight: 700; }
+.history-menu { color: var(--muted); font-size: 12px; }
+
+/* TOAST */
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--primary); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; font-weight: 700; z-index: 1000; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
+.toast.show { opacity: 1; }
+
+@media (max-width: 640px) {
+  header { padding: 0 10px; }
+  .header-title { font-size: 13px; }
+  nav button { padding: 5px 8px; font-size: 11px; }
+  main { padding: 10px; }
+  .menu-grid { grid-template-columns: 1fr; }
+  .week-grid { grid-template-columns: repeat(7,1fr); gap: 3px; }
+  .week-col-date { font-size: 14px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-title">✂ 理容室 予約管理</div>
+  <nav>
+    <button class="active" onclick="showSection('calendar',this)">カレンダー</button>
+    <button onclick="showSection('customers',this)">顧客管理</button>
+    <button onclick="showSection('settings',this)">設定・出力</button>
+  </nav>
+</header>
+
+<main>
+  <!-- カレンダー -->
+  <section id="calendar" class="active">
+    <!-- TODAY パネル（常時表示） -->
+    <div class="today-panel" id="today-panel">
+      <div class="today-panel-header">
+        <div class="today-panel-title" id="today-panel-title">📅 本日の予約</div>
+        <button class="btn btn-primary btn-sm" onclick="openDayView(todayStr())">日別タイムラインを開く</button>
+      </div>
+      <div id="today-list">読み込み中...</div>
+    </div>
+
+    <!-- WEEK VIEW -->
+    <div id="week-view-wrap" style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-size:13px;font-weight:700;color:var(--muted);">週間スケジュール（今日〜6日後）</div>
+        <button class="btn btn-secondary btn-sm" onclick="renderWeekView()">更新</button>
+      </div>
+      <div class="week-grid" id="week-grid"></div>
+    </div>
+
+    <!-- MONTH CALENDAR -->
+    <div id="calendar-view"></div>
+
+    <!-- DAY VIEW -->
+    <div id="day-view" style="display:none;">
+      <div class="day-header">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-back btn-sm" onclick="backToCalendar()">← 戻る</button>
+          <span class="day-title" id="selected-date-display"></span>
+          <span class="day-weekday" id="selected-weekday-display"></span>
+        </div>
+        <div class="day-btns">
+          <button class="btn btn-secondary btn-sm" onclick="openCustomerModal()">顧客登録</button>
+          <button class="btn btn-primary btn-sm" onclick="openReservationModal()">＋ 新規予約</button>
+        </div>
+      </div>
+      <div class="timeline-container">
+        <div class="timeline-scroll" id="timeline-scroll">
+          <div class="timeline-inner" id="timeline-inner">
+            <div class="time-labels" id="time-labels"></div>
+            <div class="grid-lines" id="grid-lines"></div>
+            <div class="reservations-area" id="reservations-area"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 顧客管理 -->
+  <section id="customers">
+    <div class="controls">
+      <input type="text" class="search-input" id="customer-search" placeholder="名前・電話番号で検索">
+      <button class="btn btn-primary btn-sm" onclick="openCustomerModal()">＋ 新規顧客登録</button>
+    </div>
+    <table>
+      <thead><tr><th>名前</th><th>電話番号</th><th>最終来店</th><th>操作</th></tr></thead>
+      <tbody id="customer-list"></tbody>
+    </table>
+  </section>
+
+  <!-- 設定 -->
+  <section id="settings">
+    <div class="card">
+      <h3>📥 CSVエクスポート（予約データ）</h3>
+      <p>予約データをCSV形式でダウンロードします。iCloud Drive等に保存してバックアップに使えます。</p>
+      <button class="btn btn-primary btn-sm" onclick="exportReservationsCSV()">予約CSVをダウンロード</button>
+    </div>
+    <div class="card">
+      <h3>📥 CSVエクスポート（顧客データ）</h3>
+      <p>顧客データをCSV形式でダウンロードします。</p>
+      <button class="btn btn-primary btn-sm" onclick="exportCustomersCSV()">顧客CSVをダウンロード</button>
+    </div>
+    <div class="card">
+      <h3>📤 CSVインポート（予約データ）</h3>
+      <p>以前エクスポートした予約CSVを読み込みます。同じIDのデータは上書きされます。</p>
+      <input type="file" id="import-res-file" accept=".csv" style="display:none;" onchange="importReservationsCSV(event)">
+      <button class="btn btn-success btn-sm" onclick="document.getElementById('import-res-file').click()">予約CSVを読み込む</button>
+      <div class="csv-format">
+        フォーマット例：<br>
+        id,date,startTime,duration,menus,price,customerId,color<br>
+        1,2024-01-15,10:00,40,"カット/シャンプー",3500,1,#d35400
+      </div>
+    </div>
+    <div class="card">
+      <h3>📤 CSVインポート（顧客データ）</h3>
+      <p>以前エクスポートした顧客CSVを読み込みます。同じIDのデータは上書きされます。</p>
+      <input type="file" id="import-cust-file" accept=".csv" style="display:none;" onchange="importCustomersCSV(event)">
+      <button class="btn btn-success btn-sm" onclick="document.getElementById('import-cust-file').click()">顧客CSVを読み込む</button>
+      <div class="csv-format">
+        フォーマット例：<br>
+        id,name,phone,note,createdAt,updatedAt<br>
+        1,山田太郎,090-1234-5678,"毛量多め",2024-01-01T00:00:00.000Z,2024-01-15T00:00:00.000Z
+      </div>
+    </div>
+    <div class="card">
+      <h3>施術メニュー（所要時間）</h3>
+      <div id="menu-list-display"></div>
+    </div>
+  </section>
+</main>
+
+<!-- 予約詳細モーダル（タップで表示） -->
+<div class="modal-backdrop" id="res-detail-modal">
+  <div class="modal-box" style="max-width:400px;">
+    <button class="modal-close" onclick="closeModal('res-detail-modal')">✕</button>
+    <div class="res-detail-header">
+      <div class="res-detail-dot" id="detail-dot"></div>
+      <div class="res-detail-name" id="detail-cust-name2"></div>
+    </div>
+    <div id="res-detail-body"></div>
+    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
+      <button class="btn btn-secondary btn-sm" onclick="editFromDetail()">編集する</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteFromDetail()">予約を取り消す</button>
+    </div>
+  </div>
+</div>
+
+<!-- 予約編集モーダル -->
+<div class="modal-backdrop" id="reservation-modal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('reservation-modal')">✕</button>
+    <div class="modal-title" id="reservation-modal-title">新規予約</div>
+    <form id="reservation-form" onsubmit="handleReservationSubmit(event)">
+      <input type="hidden" id="res-id">
+      <div class="form-group">
+        <label class="form-label">顧客</label>
+        <select class="form-select" id="res-customer-id" required></select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">開始時間</label>
+        <input type="time" class="form-input" id="res-start-time" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">メニュー（複数選択可）</label>
+        <div class="menu-grid" id="menu-grid"></div>
+      </div>
+      <div class="form-group">
+        <div class="total-badge">合計時間 <span id="res-total-time">0</span> 分 <span style="font-size:11px;font-weight:400;color:var(--muted);">+ インターバル 5分</span></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">料金（円）</label>
+        <input type="number" class="form-input" id="res-price" placeholder="0">
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button type="submit" class="btn btn-primary">予約を保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 顧客モーダル -->
+<div class="modal-backdrop" id="customer-modal">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('customer-modal')">✕</button>
+    <div class="modal-title" id="customer-modal-title">顧客登録</div>
+    <form id="customer-form" onsubmit="handleCustomerSubmit(event)">
+      <input type="hidden" id="cust-id">
+      <div class="form-group">
+        <label class="form-label">名前</label>
+        <input type="text" class="form-input" id="cust-name" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">電話番号</label>
+        <input type="tel" class="form-input" id="cust-phone">
+      </div>
+      <div class="form-group">
+        <label class="form-label">メモ（改行で箇条書き）</label>
+        <textarea class="form-textarea" id="cust-note" rows="4"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button type="submit" class="btn btn-primary">登録</button>
+        <button type="button" class="btn btn-danger" id="cust-delete-btn" style="display:none;" onclick="handleCustomerDelete()">削除</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- 顧客詳細モーダル -->
+<div class="modal-backdrop" id="customer-detail-modal">
+  <div class="modal-box" style="max-width:540px;">
+    <button class="modal-close" onclick="closeModal('customer-detail-modal')">✕</button>
+    <div class="modal-title" id="detail-cust-name"></div>
+    <div id="detail-cust-info" style="margin-bottom:16px;padding:12px;background:var(--card);border-radius:8px;font-size:13px;"></div>
+    <div style="font-weight:700;font-size:13px;color:var(--muted);margin-bottom:10px;">施術履歴</div>
+    <div id="detail-reservation-history" style="max-height:260px;overflow-y:auto;"></div>
+    <div style="margin-top:16px;">
+      <button class="btn btn-secondary btn-sm" onclick="openCustomerEditFromDetail()">情報を編集する</button>
+    </div>
+  </div>
+</div>
+
+<div class="drag-indicator" id="drag-indicator"></div>
+<div class="toast" id="toast"></div>
+
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+  }
+</script>
+</body>
+</html>
