@@ -45,7 +45,17 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // ===== ユーティリティ =====
 function todayStr() {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function dateToStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
 }
 function minToPx(min) { return min * PX_PER_MIN; }
 function pxToMin(px)  { return Math.round(px / PX_PER_MIN); }
@@ -61,7 +71,13 @@ function calcEndISO(date, start, durMin) {
   const [h,m] = start.split(':').map(Number);
   const d = new Date(date+'T00:00:00');
   d.setHours(h, m+durMin);
-  return d.toISOString();
+  // ローカル時刻でISO文字列を生成（UTCズレを防ぐ）
+  const yy = d.getFullYear();
+  const mo = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  return `${yy}-${mo}-${dd}T${hh}:${mm}:00`;
 }
 function showToast(msg) {
   const t = document.getElementById('toast');
@@ -127,7 +143,7 @@ async function renderWeekView() {
   for (let i = 0; i < 7; i++) {
     const d = new Date(today);
     d.setDate(today.getDate() + i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = dateToStr(d);
     const wd = d.getDay();
     const isToday = (i === 0);
     const isSun = wd === 0;
@@ -152,7 +168,7 @@ async function renderWeekView() {
     });
 
     col.innerHTML = `
-      <div class="week-col-header">
+      <div class="week-col-header" style="cursor:pointer;" onclick="openDayView('${dateStr}')">
         <div class="week-col-day">${WEEKDAYS[wd]}</div>
         <div class="week-col-date">${d.getDate()}</div>
       </div>
@@ -225,11 +241,12 @@ function initCalendar() {
   calendar = new FullCalendar.Calendar(el, {
     initialView: 'dayGridMonth',
     locale: 'ja',
+    timeZone: 'local',
     headerToolbar: { left:'prev,next today', center:'title', right:'dayGridMonth' },
     height: 'auto',
     dayMaxEvents: 3,
     dateClick: info => openDayView(info.dateStr),
-    eventClick: info => showResDetail(parseInt(info.event.id)),
+    eventClick: info => { openDayView(info.event.startStr.slice(0,10)); },
     events: async (fetchInfo, success) => {
       const res = await getAllReservations();
       success(res.map(r => ({
@@ -298,9 +315,47 @@ async function renderTimeline(date) {
 
   const reservations = await getAllReservations();
   const customers    = await getAllCustomers();
-  reservations
+  const dayRes = reservations
     .filter(r => r.date === date)
-    .sort((a,b) => a.startTime.localeCompare(b.startTime))
+    .sort((a,b) => a.startTime.localeCompare(b.startTime));
+
+  // ===== 空き時間バー（9:00〜18:00）=====
+  const OPEN_START = (9  - START_HOUR) * 60;  // 9:00 → min from START_HOUR
+  const OPEN_END   = (18 - START_HOUR) * 60;  // 18:00
+  // 予約のブロック（施術+インターバル）をリスト化
+  const busySlots = dayRes.map(r => {
+    const s = timeToMin(r.startTime);
+    return { s, e: s + r.duration + INTERVAL };
+  });
+  // 空き時間を算出
+  const freeSlots = [];
+  let cursor = OPEN_START;
+  const sortedBusy = busySlots.filter(b => b.e > OPEN_START && b.s < OPEN_END)
+    .sort((a,b) => a.s - b.s);
+  for (const b of sortedBusy) {
+    const blockStart = Math.max(b.s, OPEN_START);
+    if (cursor < blockStart) freeSlots.push({ s: cursor, e: blockStart });
+    cursor = Math.max(cursor, b.e);
+  }
+  if (cursor < OPEN_END) freeSlots.push({ s: cursor, e: OPEN_END });
+
+  // 空き時間バーを描画
+  freeSlots.forEach(slot => {
+    const top    = minToPx(slot.s);
+    const height = minToPx(slot.e - slot.s);
+    if (height < 1) return;
+    const bar = document.createElement('div');
+    bar.className = 'free-slot';
+    bar.style.cssText = `top:${top}px;height:${height}px;`;
+    const label = document.createElement('div');
+    label.className = 'free-slot-label';
+    const dur = slot.e - slot.s;
+    label.textContent = dur >= 15 ? `空き ${minToTime(slot.s)}〜${minToTime(slot.e)}（${dur}分）` : '';
+    bar.appendChild(label);
+    resArea.appendChild(bar);
+  });
+
+  dayRes
     .forEach(r => {
       const cust     = customers.find(c => c.id === r.customerId);
       const startMin = timeToMin(r.startTime);
