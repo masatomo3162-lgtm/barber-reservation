@@ -1,7 +1,7 @@
 // ===== 定数 =====
 const WEEKDAYS = ['日','月','火','水','木','金','土'];
 const START_HOUR = 8;
-const END_HOUR   = 20;
+const END_HOUR   = 19;
 const PX_PER_MIN = 3;
 const INTERVAL   = 5;
 
@@ -270,19 +270,20 @@ function openDayView(date) {
     `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
   document.getElementById('selected-weekday-display').textContent =
     `（${WEEKDAYS[d.getDay()]}曜日）`;
-  document.getElementById('week-view-wrap').style.display = 'none';
-  document.getElementById('today-panel').style.display = 'none';
-  document.getElementById('calendar-view').style.display = 'none';
-  document.getElementById('day-view').style.display = 'block';
+  // カレンダーsectionを非表示、day-view-sectionを表示
+  document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
+  document.getElementById('day-view-section').classList.add('active');
   renderTimeline(date);
 }
 
 function backToCalendar() {
-  document.getElementById('week-view-wrap').style.display = 'block';
-  document.getElementById('today-panel').style.display = 'block';
-  document.getElementById('calendar-view').style.display = 'block';
-  document.getElementById('day-view').style.display = 'none';
+  document.querySelectorAll('main section').forEach(s => s.classList.remove('active'));
+  document.getElementById('calendar').classList.add('active');
+  // navボタンのactiveをカレンダーに戻す
+  document.querySelectorAll('nav button').forEach((b,i) => b.classList.toggle('active', i===0));
   calendar.refetchEvents();
+  renderTodayPanel();
+  renderWeekView();
 }
 
 // ===== タイムライン =====
@@ -321,7 +322,7 @@ async function renderTimeline(date) {
 
   // ===== 空き時間バー（9:00〜18:00）=====
   const OPEN_START = (9  - START_HOUR) * 60;  // 9:00 → min from START_HOUR
-  const OPEN_END   = (18 - START_HOUR) * 60;  // 18:00
+  const OPEN_END   = (19 - START_HOUR) * 60;  // 19:00
   // 予約のブロック（施術+インターバル）をリスト化
   const busySlots = dayRes.map(r => {
     const s = timeToMin(r.startTime);
@@ -820,6 +821,33 @@ function closeModal(id) {
 document.querySelectorAll('.modal-backdrop').forEach(bd => {
   bd.addEventListener('click', e => { if (e.target===bd) bd.classList.remove('open'); });
 });
+
+// ===== データ全削除 =====
+async function deleteAllReservations() {
+  const count = (await getAllReservations()).length;
+  if (count === 0) { alert('予約データはありません。'); return; }
+  if (!confirm(`予約データ ${count} 件をすべて削除します。\nこの操作は元に戻せません。\nよろしいですか？`)) return;
+  const db = await openDB();
+  const tx = db.transaction('reservations', 'readwrite');
+  tx.objectStore('reservations').clear();
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  alert('予約データをすべて削除しました。');
+  renderTodayPanel();
+  renderWeekView();
+  if (calendar) calendar.refetchEvents();
+}
+
+async function deleteAllCustomers() {
+  const count = (await getAllCustomers()).length;
+  if (count === 0) { alert('顧客データはありません。'); return; }
+  if (!confirm(`顧客データ ${count} 件をすべて削除します。\nこの操作は元に戻せません。\nよろしいですか？`)) return;
+  const db = await openDB();
+  const tx = db.transaction('customers', 'readwrite');
+  tx.objectStore('customers').clear();
+  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  alert('顧客データをすべて削除しました。');
+  renderCustomerList();
+}
 
 async function autoBackup() {
   const reservations = await getAllReservations();

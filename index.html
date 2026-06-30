@@ -129,8 +129,8 @@ section.active { display: block; }
 
 /* TIMELINE */
 .timeline-container { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-.timeline-scroll { overflow-y: auto; position: relative; height: calc(720px * var(--PX) + 40px); max-height: 72vh; }
-.timeline-inner { position: relative; height: calc(720px * var(--PX)); }
+.timeline-scroll { overflow-y: auto; position: relative; height: 72vh; min-height: 400px; }
+.timeline-inner { position: relative; height: 1980px; /* 660min × 3px/min (8:00-19:00) */ }
 .time-labels { position: absolute; left: 0; top: 0; width: 52px; height: 100%; border-right: 1px solid var(--border); background: var(--card); z-index: 10; }
 .time-label { position: absolute; left: 0; width: 52px; text-align: right; padding-right: 8px; font-size: 11px; color: var(--muted); font-weight: 700; line-height: 1; transform: translateY(-50%); }
 .grid-lines { position: absolute; left: 52px; right: 0; top: 0; height: 100%; pointer-events: none; }
@@ -305,27 +305,27 @@ tr:hover td { background: var(--accent-light); }
 
     <!-- MONTH CALENDAR -->
     <div id="calendar-view"></div>
+  </section>
 
-    <!-- DAY VIEW -->
-    <div id="day-view" style="display:none;">
-      <div class="day-header">
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-          <button class="btn btn-back btn-sm" onclick="backToCalendar()">← 戻る</button>
-          <span class="day-title" id="selected-date-display"></span>
-          <span class="day-weekday" id="selected-weekday-display"></span>
-        </div>
-        <div class="day-btns">
-          <button class="btn btn-secondary btn-sm" onclick="openCustomerModal()">顧客登録</button>
-          <button class="btn btn-primary btn-sm" onclick="openReservationModal()">＋ 新規予約</button>
-        </div>
+  <!-- DAY VIEW（独立セクション） -->
+  <section id="day-view-section">
+    <div class="day-header">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-back btn-sm" onclick="backToCalendar()">← カレンダーへ戻る</button>
+        <span class="day-title" id="selected-date-display"></span>
+        <span class="day-weekday" id="selected-weekday-display"></span>
       </div>
-      <div class="timeline-container">
-        <div class="timeline-scroll" id="timeline-scroll">
-          <div class="timeline-inner" id="timeline-inner">
-            <div class="time-labels" id="time-labels"></div>
-            <div class="grid-lines" id="grid-lines"></div>
-            <div class="reservations-area" id="reservations-area"></div>
-          </div>
+      <div class="day-btns">
+        <button class="btn btn-secondary btn-sm" onclick="openCustomerModal()">顧客登録</button>
+        <button class="btn btn-primary btn-sm" onclick="openReservationModal()">＋ 新規予約</button>
+      </div>
+    </div>
+    <div class="timeline-container">
+      <div class="timeline-scroll" id="timeline-scroll">
+        <div class="timeline-inner" id="timeline-inner">
+          <div class="time-labels" id="time-labels"></div>
+          <div class="grid-lines" id="grid-lines"></div>
+          <div class="reservations-area" id="reservations-area"></div>
         </div>
       </div>
     </div>
@@ -380,6 +380,14 @@ tr:hover td { background: var(--accent-light); }
     <div class="card">
       <h3>施術メニュー（所要時間）</h3>
       <div id="menu-list-display"></div>
+    </div>
+    <div class="card" style="border:1.5px solid #e74c3c;">
+      <h3 style="color:#c0392b;">⚠️ データ削除</h3>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px;">削除したデータは元に戻せません。事前にCSVエクスポートでバックアップしてください。</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-danger btn-sm" onclick="deleteAllReservations()">予約データをすべて削除</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteAllCustomers()">顧客データをすべて削除</button>
+      </div>
     </div>
   </section>
 </main>
