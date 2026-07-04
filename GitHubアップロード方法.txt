@@ -1,0 +1,13 @@
+【GitHubへの反映方法】
+
+1. このZIPを展開します。
+2. 「barber-reservation」フォルダーの中身をすべて選択します。
+3. GitHubの「barber-reservation」リポジトリを開きます。
+4. Add file → Upload files を選び、フォルダーの中身をアップロードします。
+5. Commit changes を押します。
+6. GitHub Pagesの更新後、ブラウザで Ctrl＋F5 を押します。
+
+【スマホ・iPadのホーム画面アイコン】
+以前のアイコンでホーム画面に追加済みの場合は、一度削除してから再追加してください。
+
+※アプリの保存データ形式や機能は変更していません。

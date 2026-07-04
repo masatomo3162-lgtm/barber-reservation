@@ -1,12 +1,22 @@
-const CACHE_NAME = 'barber-app-v1.0.1';
+const CACHE_NAME = 'barber-app-icon-20260704';
 const LOCAL_ASSETS = [
   './',
   './index.html',
+  './manifest.webmanifest',
+  './manifest.json',
+  './favicon.ico',
+  './favicon-16.png',
+  './favicon-32.png',
+  './icon.svg',
+  './apple-touch-icon.png',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-512-maskable.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/icon-512-maskable.png',
   './js/db.js',
   './js/app.js',
-  './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png'
 ];
 const FULLCALENDAR_URL = 'https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js';
 
