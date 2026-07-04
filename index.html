@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>理容室予約管理</title>
+<title>理容室予約管理 v1.0.1</title>
 <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js'></script>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#1a1a2e">
@@ -378,6 +378,10 @@ tr:hover td { background: var(--accent-light); }
       </div>
     </div>
     <div class="card">
+      <h3>アプリ情報</h3>
+      <p>バージョン 1.0.1（バグ修正版）</p>
+    </div>
+    <div class="card">
       <h3>施術メニュー（所要時間）</h3>
       <div id="menu-list-display"></div>
     </div>
@@ -421,7 +425,7 @@ tr:hover td { background: var(--accent-light); }
       </div>
       <div class="form-group">
         <label class="form-label">開始時間</label>
-        <input type="time" class="form-input" id="res-start-time" required>
+        <input type="time" class="form-input" id="res-start-time" step="300" required>
       </div>
       <div class="form-group">
         <label class="form-label">メニュー（複数選択可）</label>

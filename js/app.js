@@ -90,6 +90,43 @@ function dateLabel(dateStr) {
   return `${d.getMonth()+1}/${d.getDate()}（${WEEKDAYS[d.getDay()]}）`;
 }
 
+function escapeHTML(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeColor(value) {
+  const color = String(value || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : BLOCK_COLORS[0];
+}
+
+function reservationStartDate(r) {
+  const time = /^\d{2}:\d{2}$/.test(r.startTime || '') ? r.startTime : '00:00';
+  return new Date(`${r.date}T${time}:00`);
+}
+
+async function findReservationConflict(date, startTime, duration, ignoreId = null) {
+  const start = timeToMin(startTime);
+  const end = start + duration + INTERVAL;
+  if (!Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return null;
+  const reservations = await getAllReservations();
+  return reservations.find(r => {
+    if (r.date !== date || r.id === ignoreId) return false;
+    const otherStart = timeToMin(r.startTime);
+    const otherDuration = Number(r.duration) || 0;
+    const otherEnd = otherStart + otherDuration + INTERVAL;
+    return Number.isFinite(otherStart) && start < otherEnd && end > otherStart;
+  }) || null;
+}
+
+function refreshCalendar() {
+  if (calendar) calendar.refetchEvents();
+}
+
 // ===== TODAY パネル =====
 async function renderTodayPanel() {
   const today = todayStr();
@@ -119,11 +156,11 @@ async function renderTodayPanel() {
     div.className = 'today-list-item';
     div.onclick = () => showResDetail(r.id);
     div.innerHTML = `
-      <div class="today-color-dot" style="background:${r.color||BLOCK_COLORS[0]};"></div>
+      <div class="today-color-dot" style="background:${safeColor(r.color)};"></div>
       <div style="flex:1;min-width:0;">
         <div class="today-time">${r.startTime} 〜 ${endTime}</div>
-        <div class="today-name">${cust ? cust.name : '顧客不明'}</div>
-        <div class="today-menu">${r.menus.join('・')}</div>
+        <div class="today-name">${escapeHTML(cust ? cust.name : '顧客不明')}</div>
+        <div class="today-menu">${escapeHTML((r.menus || []).join('・'))}</div>
       </div>
       <div class="today-price">${r.price ? r.price.toLocaleString()+'円' : ''}</div>
     `;
@@ -160,9 +197,9 @@ async function renderWeekView() {
     dayItems.forEach(r => {
       const cust = customers.find(c => c.id === r.customerId);
       itemsHTML += `
-        <div class="week-res-item" style="background:${r.color||BLOCK_COLORS[0]};"
+        <div class="week-res-item" style="background:${safeColor(r.color)};"
              onclick="showResDetail(${r.id})">
-          <div class="week-res-name">${cust ? cust.name : '?'}</div>
+          <div class="week-res-name">${escapeHTML(cust ? cust.name : '?')}</div>
           <div class="week-res-time">${r.startTime}（${r.duration}分）</div>
         </div>`;
     });
@@ -191,7 +228,7 @@ async function showResDetail(id) {
   const endMin  = timeToMin(r.startTime) + r.duration;
   const endTime = minToTime(endMin);
 
-  document.getElementById('detail-dot').style.background = r.color || BLOCK_COLORS[0];
+  document.getElementById('detail-dot').style.background = safeColor(r.color);
   document.getElementById('detail-cust-name2').textContent = cust ? cust.name : '顧客不明';
   document.getElementById('res-detail-body').innerHTML = `
     <div class="res-detail-row">
@@ -204,14 +241,14 @@ async function showResDetail(id) {
     </div>
     <div class="res-detail-row">
       <span class="res-detail-label">メニュー</span>
-      <span>${r.menus.join('・')}</span>
+      <span>${escapeHTML((r.menus || []).join('・'))}</span>
     </div>
     <div class="res-detail-row">
       <span class="res-detail-label">料金</span>
       <span>${r.price ? r.price.toLocaleString()+'円' : '未設定'}</span>
     </div>
-    ${cust && cust.phone ? `<div class="res-detail-row"><span class="res-detail-label">電話番号</span><span>${cust.phone}</span></div>` : ''}
-    ${cust && cust.note ? `<div class="res-detail-row"><span class="res-detail-label">メモ</span><span style="font-size:12px;">${cust.note}</span></div>` : ''}
+    ${cust && cust.phone ? `<div class="res-detail-row"><span class="res-detail-label">電話番号</span><span>${escapeHTML(cust.phone)}</span></div>` : ''}
+    ${cust && cust.note ? `<div class="res-detail-row"><span class="res-detail-label">メモ</span><span style="font-size:12px;">${escapeHTML(cust.note).replace(/\n/g, '<br>')}</span></div>` : ''}
   `;
   document.getElementById('res-detail-modal').classList.add('open');
 }
@@ -224,20 +261,25 @@ function editFromDetail() {
 async function deleteFromDetail() {
   if (!currentDetailId || !confirm('この予約を取り消しますか？')) return;
   await deleteReservation(currentDetailId);
-  autoBackup();
+  await autoBackup();
   closeModal('res-detail-modal');
-  renderTodayPanel();
-  renderWeekView();
-  if (document.getElementById('day-view').style.display !== 'none') {
-    renderTimeline(selectedDate);
+  await renderTodayPanel();
+  await renderWeekView();
+  if (document.getElementById('day-view-section').classList.contains('active')) {
+    await renderTimeline(selectedDate);
   }
-  calendar.refetchEvents();
+  refreshCalendar();
   showToast('予約を取り消しました');
 }
 
 // ===== カレンダー =====
 function initCalendar() {
   const el = document.getElementById('calendar-view');
+  if (!window.FullCalendar || typeof window.FullCalendar.Calendar !== 'function') {
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--red);">カレンダーを読み込めませんでした。通信を確認して再読み込みしてください。<br><span style="font-size:12px;color:var(--muted);">顧客管理・設定・CSVバックアップは利用できます。</span></div>';
+    calendar = null;
+    return;
+  }
   calendar = new FullCalendar.Calendar(el, {
     initialView: 'dayGridMonth',
     locale: 'ja',
@@ -254,7 +296,7 @@ function initCalendar() {
         title: r.menus[0] || '',
         start: `${r.date}T${r.startTime}`,
         end: calcEndISO(r.date, r.startTime, r.duration+INTERVAL),
-        backgroundColor: r.color || BLOCK_COLORS[0],
+        backgroundColor: safeColor(r.color),
         borderColor: 'transparent',
         textColor: '#fff',
       })));
@@ -281,7 +323,7 @@ function backToCalendar() {
   document.getElementById('calendar').classList.add('active');
   // navボタンのactiveをカレンダーに戻す
   document.querySelectorAll('nav button').forEach((b,i) => b.classList.toggle('active', i===0));
-  calendar.refetchEvents();
+  refreshCalendar();
   renderTodayPanel();
   renderWeekView();
 }
@@ -368,18 +410,19 @@ async function renderTimeline(date) {
       const block = document.createElement('div');
       block.className = 'res-block';
       block.dataset.id = r.id;
-      block.style.cssText = `top:${top}px;height:${height}px;background:${r.color||BLOCK_COLORS[0]};color:#fff;border-left-color:rgba(0,0,0,0.28);`;
+      block.style.cssText = `top:${top}px;height:${height}px;background:${safeColor(r.color)};color:#fff;border-left-color:rgba(0,0,0,0.28);`;
       block.innerHTML = `
-        <div class="res-block-name">${cust ? cust.name : '顧客不明'}</div>
-        <div class="res-block-menu">${r.menus.join('・')}</div>
+        <div class="res-block-name">${escapeHTML(cust ? cust.name : '顧客不明')}</div>
+        <div class="res-block-menu">${escapeHTML((r.menus || []).join('・'))}</div>
         <div class="res-block-time">${r.startTime} 〜 ${endTime}（${r.duration}分）</div>
       `;
       block.addEventListener('click', () => showResDetail(r.id));
 
       block.draggable = true;
       block.addEventListener('dragstart', e => {
-        e.dataTransfer.setData('text/plain', r.id);
-        dragOffsetMin = pxToMin(e.offsetY);
+        e.dataTransfer.setData('text/plain', String(r.id));
+        const blockRect = block.getBoundingClientRect();
+        dragOffsetMin = pxToMin(e.clientY - blockRect.top);
         block.classList.add('dragging');
         document.getElementById('drag-indicator').style.display = 'block';
       });
@@ -406,16 +449,25 @@ async function renderTimeline(date) {
     const id = parseInt(e.dataTransfer.getData('text/plain'));
     const rect = resArea.getBoundingClientRect();
     const snapped = Math.round((pxToMin(e.clientY-rect.top)-dragOffsetMin)/5)*5;
-    const clamped = Math.max(0, Math.min(snapped, totalMin-10));
     const all = await getAllReservations();
     const res = all.find(r => r.id === id);
     if (res) {
-      res.startTime = minToTime(clamped);
-      await updateReservation(res);
-      renderTimeline(date);
-      renderTodayPanel();
-      renderWeekView();
-      calendar.refetchEvents();
+      const maxStart = Math.max(0, totalMin - ((Number(res.duration) || 0) + INTERVAL));
+      const clamped = Math.max(0, Math.min(snapped, maxStart));
+      const newStartTime = minToTime(clamped);
+      const conflict = await findReservationConflict(date, newStartTime, Number(res.duration) || 0, id);
+      if (conflict) {
+        alert(`その時間には別の予約があります（${conflict.startTime}開始）。`);
+        await renderTimeline(date);
+      } else {
+        res.startTime = newStartTime;
+        await updateReservation(res);
+        await autoBackup();
+        await renderTimeline(date);
+        await renderTodayPanel();
+        await renderWeekView();
+        refreshCalendar();
+      }
     }
     document.getElementById('drag-indicator').style.display = 'none';
   });
@@ -472,7 +524,7 @@ async function editReservation(id) {
   document.getElementById('res-start-time').value = res.startTime;
   document.getElementById('res-price').value = res.price || '';
   document.querySelectorAll('#menu-grid input[name="menu"]').forEach(cb => {
-    cb.checked = res.menus.includes(cb.dataset.label);
+    cb.checked = (res.menus || []).includes(cb.dataset.label);
     cb.closest('.menu-item').classList.toggle('checked', cb.checked);
   });
   updateTotalTime();
@@ -495,66 +547,96 @@ async function renderCustomerSelect(selectedId) {
 
 async function handleReservationSubmit(e) {
   e.preventDefault();
-  const id      = document.getElementById('res-id').value;
+  const idValue = document.getElementById('res-id').value;
+  const id = idValue ? parseInt(idValue, 10) : null;
   const checked = document.querySelectorAll('#menu-grid input[name="menu"]:checked');
-  const menus   = Array.from(checked).map(cb => cb.dataset.label);
-  const total   = Array.from(checked).reduce((s,cb) => s+parseInt(cb.dataset.time), 0);
+  const menus = Array.from(checked).map(cb => cb.dataset.label);
+  const total = Array.from(checked).reduce((sum, cb) => sum + parseInt(cb.dataset.time, 10), 0);
   if (!menus.length) { alert('メニューを1つ以上選択してください'); return; }
 
-  const data = {
-    customerId: parseInt(document.getElementById('res-customer-id').value),
-    date: selectedDate,
-    startTime: document.getElementById('res-start-time').value,
-    duration: total,
-    menus,
-    price: parseInt(document.getElementById('res-price').value) || 0,
-  };
+  const customerId = parseInt(document.getElementById('res-customer-id').value, 10);
+  const startTime = document.getElementById('res-start-time').value;
+  if (!Number.isInteger(customerId) || !startTime) {
+    alert('顧客と開始時間を確認してください');
+    return;
+  }
 
+  let existing = null;
   if (id) {
     const all = await getAllReservations();
-    const existing = all.find(r => r.id === parseInt(id));
-    data.id    = parseInt(id);
-    data.color = existing.color;
+    existing = all.find(r => r.id === id) || null;
+    if (!existing) {
+      alert('編集対象の予約が見つかりません。画面を更新してください。');
+      return;
+    }
+  }
+
+  const date = existing ? existing.date : selectedDate;
+  const conflict = await findReservationConflict(date, startTime, total, id);
+  if (conflict) {
+    alert(`その時間には別の予約があります（${conflict.startTime}開始）。`);
+    return;
+  }
+
+  const data = {
+    customerId,
+    date,
+    startTime,
+    duration: total,
+    menus,
+    price: Math.max(0, parseInt(document.getElementById('res-price').value, 10) || 0),
+    color: existing ? safeColor(existing.color) : BLOCK_COLORS[Math.floor(Math.random() * BLOCK_COLORS.length)],
+  };
+
+  if (existing) {
+    data.id = id;
     await updateReservation(data);
     showToast('予約を更新しました');
   } else {
-    data.color = BLOCK_COLORS[Math.floor(Math.random()*BLOCK_COLORS.length)];
     await addReservation(data);
     showToast('予約を追加しました');
   }
 
-  autoBackup();
+  await autoBackup();
   closeModal('reservation-modal');
-  renderTimeline(selectedDate);
-  renderTodayPanel();
-  renderWeekView();
-  calendar.refetchEvents();
+  if (document.getElementById('day-view-section').classList.contains('active')) {
+    await renderTimeline(selectedDate);
+  }
+  await renderTodayPanel();
+  await renderWeekView();
+  refreshCalendar();
 }
 
 // ===== 顧客 =====
 async function renderCustomers(filter='') {
-  const customers    = await getAllCustomers();
+  const customers = await getAllCustomers();
   const reservations = await getAllReservations();
   const list = document.getElementById('customer-list');
+  const now = new Date();
+  const normalizedFilter = String(filter || '').toLowerCase();
   list.innerHTML = '';
+
   customers
-    .filter(c => c.name.includes(filter) || (c.phone && c.phone.includes(filter)))
+    .filter(c => String(c.name || '').toLowerCase().includes(normalizedFilter) ||
+      String(c.phone || '').toLowerCase().includes(normalizedFilter))
     .forEach(c => {
       const hist = reservations
-        .filter(r => r.customerId===c.id)
-        .sort((a,b) => b.date.localeCompare(a.date));
+        .filter(r => r.customerId === c.id && reservationStartDate(r) <= now)
+        .sort((a, b) => reservationStartDate(b) - reservationStartDate(a));
       const last = hist[0];
-      let lastText='なし', daysText='';
+      let lastText = 'なし', daysText = '';
       if (last) {
-        const diff = Math.floor((Date.now()-new Date(last.date+'T00:00:00'))/86400000);
-        lastText = last.date;
-        daysText = `<span class="days-ago">${diff}日前</span>`;
+        const lastDate = new Date(last.date + 'T00:00:00');
+        const today = new Date(todayStr() + 'T00:00:00');
+        const diff = Math.max(0, Math.floor((today - lastDate) / 86400000));
+        lastText = escapeHTML(last.date);
+        daysText = `<span class="days-ago">${diff === 0 ? '本日' : diff + '日前'}</span>`;
       }
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><a href="#" style="color:var(--accent);font-weight:700;text-decoration:none;"
-              onclick="showCustomerDetail(${c.id});return false;">${c.name}</a></td>
-        <td>${c.phone||'—'}</td>
+              onclick="showCustomerDetail(${c.id});return false;">${escapeHTML(c.name)}</a></td>
+        <td>${escapeHTML(c.phone || '—')}</td>
         <td>${lastText}${daysText}</td>
         <td><button class="btn btn-secondary btn-sm" onclick="openCustomerEdit(${c.id})">編集</button></td>
       `;
@@ -592,7 +674,11 @@ async function handleCustomerSubmit(e) {
     updatedAt: new Date().toISOString(),
   };
   if (id) {
-    customer.id = parseInt(id);
+    const customerId = parseInt(id, 10);
+    const existingCustomers = await getAllCustomers();
+    const existing = existingCustomers.find(c => c.id === customerId);
+    customer.id = customerId;
+    customer.createdAt = existing && existing.createdAt ? existing.createdAt : new Date().toISOString();
     await updateCustomer(customer);
     showToast('顧客情報を更新しました');
   } else {
@@ -600,7 +686,7 @@ async function handleCustomerSubmit(e) {
     await addCustomer(customer);
     showToast('顧客を登録しました');
   }
-  autoBackup();
+  await autoBackup();
   closeModal('customer-modal');
   renderCustomers();
   if (currentDetailCustomerId) showCustomerDetail(currentDetailCustomerId);
@@ -609,11 +695,10 @@ async function handleCustomerSubmit(e) {
 async function handleCustomerDelete() {
   const id = parseInt(document.getElementById('cust-id').value);
   if (!id || !confirm('顧客情報を削除しますか？（予約履歴は残ります）')) return;
-  const tx = db.transaction(['customers'],'readwrite');
-  tx.objectStore('customers').delete(id);
-  autoBackup();
+  await deleteCustomer(id);
+  await autoBackup();
   closeModal('customer-modal');
-  renderCustomers();
+  await renderCustomers();
   showToast('顧客を削除しました');
 }
 
@@ -624,9 +709,9 @@ async function showCustomerDetail(id) {
   const c = customers.find(x => x.id===id);
   if (!c) return;
   document.getElementById('detail-cust-name').textContent = c.name;
-  const notes = c.note ? c.note.split('\n').map(l=>`<li>${l}</li>`).join('') : 'なし';
+  const notes = c.note ? c.note.split('\n').map(line => `<li>${escapeHTML(line)}</li>`).join('') : '<li>なし</li>';
   document.getElementById('detail-cust-info').innerHTML = `
-    <div>📞 ${c.phone||'なし'}</div>
+    <div>📞 ${escapeHTML(c.phone || 'なし')}</div>
     <div style="margin-top:8px;font-weight:700;font-size:12px;color:var(--muted);">メモ</div>
     <ul style="margin:4px 0 0 16px;font-size:12px;">${notes}</ul>
   `;
@@ -638,7 +723,7 @@ async function showCustomerDetail(id) {
     div.className = 'history-item';
     div.innerHTML = `
       <div class="history-date">${r.date}　${r.startTime}</div>
-      <div class="history-menu">${r.menus.join('・')}　${r.price?r.price.toLocaleString()+'円':''}</div>
+      <div class="history-menu">${escapeHTML((r.menus || []).join('・'))}　${r.price?r.price.toLocaleString()+'円':''}</div>
     `;
     histEl.appendChild(div);
   });
@@ -659,52 +744,106 @@ function buildMenuDisplay() {
   ).join('') + `<div style="padding:6px 0;font-size:13px;color:var(--muted);">インターバル: ${INTERVAL}分</div>`;
 }
 
+// --- CSV共通 ---
+function csvEscape(value) {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  const source = String(text || '').replace(/^\uFEFF/, '');
+
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ',') {
+      row.push(field);
+      field = '';
+    } else if (ch === '\n') {
+      row.push(field.replace(/\r$/, ''));
+      if (row.some(cell => cell !== '')) rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += ch;
+    }
+  }
+  row.push(field.replace(/\r$/, ''));
+  if (row.some(cell => cell !== '')) rows.push(row);
+  return rows;
+}
+
+function rowsToObjects(rows) {
+  if (!rows.length) return [];
+  const headers = rows[0].map(h => String(h || '').trim());
+  return rows.slice(1).map(cols => {
+    const row = {};
+    headers.forEach((header, index) => { row[header] = cols[index] ?? ''; });
+    return row;
+  });
+}
+
 // --- 予約CSV エクスポート ---
 async function exportReservationsCSV() {
   const reservations = await getAllReservations();
-  const customers    = await getAllCustomers();
-  let csv = '\uFEFFid,date,startTime,duration,menus,price,customerId,customerName,customerPhone,color\n';
+  const customers = await getAllCustomers();
+  const lines = ['id,date,startTime,duration,menus,price,customerId,customerName,customerPhone,color'];
   reservations
-    .sort((a,b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.startTime.localeCompare(b.startTime))
     .forEach(r => {
-      const c = customers.find(x => x.id===r.customerId);
-      csv += [
+      const c = customers.find(x => x.id === r.customerId);
+      lines.push([
         r.id, r.date, r.startTime, r.duration,
-        `"${r.menus.join('/')}"`,
-        r.price||0, r.customerId||'',
-        c ? `"${c.name}"` : '',
-        c ? (c.phone||'') : '',
-        r.color||''
-      ].join(',') + '\n';
+        (r.menus || []).join('/'),
+        r.price || 0, r.customerId || '',
+        c ? c.name : '',
+        c ? (c.phone || '') : '',
+        safeColor(r.color)
+      ].map(csvEscape).join(','));
     });
-  downloadFile(csv, `reservations_${todayStr()}.csv`, 'text/csv;charset=utf-8;');
+  downloadFile('\uFEFF' + lines.join('\r\n') + '\r\n', `reservations_${todayStr()}.csv`, 'text/csv;charset=utf-8;');
   showToast('予約CSVをダウンロードしました');
 }
 
 // --- 顧客CSV エクスポート ---
 async function exportCustomersCSV() {
   const customers = await getAllCustomers();
-  let csv = '\uFEFFid,name,phone,note,createdAt,updatedAt\n';
+  const lines = ['id,name,phone,note,createdAt,updatedAt'];
   customers.forEach(c => {
-    csv += [
-      c.id,
-      `"${(c.name||'').replace(/"/g,'""')}"`,
-      c.phone||'',
-      `"${(c.note||'').replace(/\n/g,' ').replace(/"/g,'""')}"`,
-      c.createdAt||'', c.updatedAt||''
-    ].join(',') + '\n';
+    lines.push([
+      c.id, c.name || '', c.phone || '', c.note || '', c.createdAt || '', c.updatedAt || ''
+    ].map(csvEscape).join(','));
   });
-  downloadFile(csv, `customers_${todayStr()}.csv`, 'text/csv;charset=utf-8;');
+  downloadFile('\uFEFF' + lines.join('\r\n') + '\r\n', `customers_${todayStr()}.csv`, 'text/csv;charset=utf-8;');
   showToast('顧客CSVをダウンロードしました');
 }
 
 function downloadFile(content, filename, mimeType) {
   const blob = new Blob([content], {type: mimeType});
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(a.href);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 // --- 予約CSV インポート ---
@@ -713,39 +852,58 @@ function importReservationsCSV(event) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async e => {
-    const text = e.target.result.replace(/^\uFEFF/,'');
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) { alert('データが見つかりません'); return; }
-    const headers = lines[0].split(',').map(h=>h.trim());
-    let count = 0;
-    for (let i=1; i<lines.length; i++) {
-      const cols = parseCSVLine(lines[i]);
-      if (!cols || cols.length < 4) continue;
-      const row = {};
-      headers.forEach((h,idx) => row[h] = cols[idx]||'');
-      if (!row.date || !row.startTime) continue;
-      const res = {
-        id: parseInt(row.id) || undefined,
-        date: row.date,
-        startTime: row.startTime,
-        duration: parseInt(row.duration)||0,
-        menus: row.menus ? row.menus.split('/').filter(Boolean) : [],
-        price: parseInt(row.price)||0,
-        customerId: parseInt(row.customerId)||null,
-        color: row.color || BLOCK_COLORS[0],
-      };
-      if (res.id) {
-        await updateReservation(res);
-      } else {
-        await addReservation(res);
+    try {
+      const rows = parseCSV(e.target.result);
+      if (rows.length < 2) { alert('データが見つかりません'); return; }
+      const headers = rows[0].map(h => String(h || '').trim());
+      if (!headers.includes('date') || !headers.includes('startTime')) {
+        alert('予約CSVの形式が正しくありません。date列とstartTime列が必要です。');
+        return;
       }
-      count++;
+      let count = 0, skipped = 0;
+      for (const row of rowsToObjects(rows)) {
+        const duration = parseInt(row.duration, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date || '') ||
+            !/^\d{2}:\d{2}$/.test(row.startTime || '') ||
+            !Number.isFinite(duration) || duration <= 0) {
+          skipped++;
+          continue;
+        }
+        const parsedId = parseInt(row.id, 10);
+        const res = {
+          date: row.date,
+          startTime: row.startTime,
+          duration,
+          menus: row.menus ? row.menus.split('/').filter(Boolean) : [],
+          price: Math.max(0, parseInt(row.price, 10) || 0),
+          customerId: parseInt(row.customerId, 10) || null,
+          color: safeColor(row.color),
+        };
+        if (Number.isInteger(parsedId) && parsedId > 0) {
+          res.id = parsedId;
+          await updateReservation(res);
+        } else {
+          await addReservation(res);
+        }
+        count++;
+      }
+      await autoBackup();
+      await renderTodayPanel();
+      await renderWeekView();
+      if (document.getElementById('day-view-section').classList.contains('active')) {
+        await renderTimeline(selectedDate);
+      }
+      refreshCalendar();
+      showToast(`${count}件の予約をインポートしました${skipped ? `（${skipped}件スキップ）` : ''}`);
+    } catch (error) {
+      console.error(error);
+      alert('予約CSVの読み込みに失敗しました。ファイル内容を確認してください。');
+    } finally {
+      event.target.value = '';
     }
-    await autoBackup();
-    renderTodayPanel();
-    renderWeekView();
-    calendar.refetchEvents();
-    showToast(`${count}件の予約をインポートしました`);
+  };
+  reader.onerror = () => {
+    alert('CSVファイルを読み込めませんでした。');
     event.target.value = '';
   };
   reader.readAsText(file, 'UTF-8');
@@ -757,52 +915,49 @@ function importCustomersCSV(event) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async e => {
-    const text = e.target.result.replace(/^\uFEFF/,'');
-    const lines = text.trim().split('\n');
-    if (lines.length < 2) { alert('データが見つかりません'); return; }
-    const headers = lines[0].split(',').map(h=>h.trim());
-    let count = 0;
-    for (let i=1; i<lines.length; i++) {
-      const cols = parseCSVLine(lines[i]);
-      if (!cols || cols.length < 2) continue;
-      const row = {};
-      headers.forEach((h,idx) => row[h] = cols[idx]||'');
-      if (!row.name) continue;
-      const cust = {
-        id: parseInt(row.id) || undefined,
-        name: row.name,
-        phone: row.phone||'',
-        note: row.note||'',
-        createdAt: row.createdAt || new Date().toISOString(),
-        updatedAt: row.updatedAt || new Date().toISOString(),
-      };
-      if (cust.id) {
-        await updateCustomer(cust);
-      } else {
-        await addCustomer(cust);
+    try {
+      const rows = parseCSV(e.target.result);
+      if (rows.length < 2) { alert('データが見つかりません'); return; }
+      const headers = rows[0].map(h => String(h || '').trim());
+      if (!headers.includes('name')) {
+        alert('顧客CSVの形式が正しくありません。name列が必要です。');
+        return;
       }
-      count++;
+      let count = 0, skipped = 0;
+      for (const row of rowsToObjects(rows)) {
+        const name = String(row.name || '').trim();
+        if (!name) { skipped++; continue; }
+        const parsedId = parseInt(row.id, 10);
+        const cust = {
+          name,
+          phone: row.phone || '',
+          note: row.note || '',
+          createdAt: row.createdAt || new Date().toISOString(),
+          updatedAt: row.updatedAt || new Date().toISOString(),
+        };
+        if (Number.isInteger(parsedId) && parsedId > 0) {
+          cust.id = parsedId;
+          await updateCustomer(cust);
+        } else {
+          await addCustomer(cust);
+        }
+        count++;
+      }
+      await autoBackup();
+      await renderCustomers();
+      showToast(`${count}件の顧客をインポートしました${skipped ? `（${skipped}件スキップ）` : ''}`);
+    } catch (error) {
+      console.error(error);
+      alert('顧客CSVの読み込みに失敗しました。ファイル内容を確認してください。');
+    } finally {
+      event.target.value = '';
     }
-    await autoBackup();
-    renderCustomers();
-    showToast(`${count}件の顧客をインポートしました`);
+  };
+  reader.onerror = () => {
+    alert('CSVファイルを読み込めませんでした。');
     event.target.value = '';
   };
   reader.readAsText(file, 'UTF-8');
-}
-
-// CSV行パーサー（ダブルクォート対応）
-function parseCSVLine(line) {
-  const result = [];
-  let cur = '', inQ = false;
-  for (let i=0; i<line.length; i++) {
-    const ch = line[i];
-    if (ch==='"') { inQ = !inQ; continue; }
-    if (ch===',' && !inQ) { result.push(cur.trim()); cur=''; continue; }
-    cur += ch;
-  }
-  result.push(cur.trim());
-  return result;
 }
 
 // ===== ユーティリティ =====
@@ -811,7 +966,7 @@ function showSection(id, btn) {
   document.getElementById(id).classList.add('active');
   document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  if (id==='calendar') { calendar.refetchEvents(); renderTodayPanel(); renderWeekView(); }
+  if (id==='calendar') { refreshCalendar(); renderTodayPanel(); renderWeekView(); }
 }
 
 function closeModal(id) {
@@ -827,32 +982,41 @@ async function deleteAllReservations() {
   const count = (await getAllReservations()).length;
   if (count === 0) { alert('予約データはありません。'); return; }
   if (!confirm(`予約データ ${count} 件をすべて削除します。\nこの操作は元に戻せません。\nよろしいですか？`)) return;
-  const db = await openDB();
-  const tx = db.transaction('reservations', 'readwrite');
-  tx.objectStore('reservations').clear();
-  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  await clearReservations();
+  await autoBackup();
   alert('予約データをすべて削除しました。');
-  renderTodayPanel();
-  renderWeekView();
-  if (calendar) calendar.refetchEvents();
+  await renderTodayPanel();
+  await renderWeekView();
+  if (document.getElementById('day-view-section').classList.contains('active')) {
+    await renderTimeline(selectedDate);
+  }
+  refreshCalendar();
 }
 
 async function deleteAllCustomers() {
   const count = (await getAllCustomers()).length;
   if (count === 0) { alert('顧客データはありません。'); return; }
-  if (!confirm(`顧客データ ${count} 件をすべて削除します。\nこの操作は元に戻せません。\nよろしいですか？`)) return;
-  const db = await openDB();
-  const tx = db.transaction('customers', 'readwrite');
-  tx.objectStore('customers').clear();
-  await new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+  if (!confirm(`顧客データ ${count} 件をすべて削除します。\n予約データは残り、予約上では「顧客不明」と表示されます。\nこの操作は元に戻せません。\nよろしいですか？`)) return;
+  await clearCustomers();
+  await autoBackup();
   alert('顧客データをすべて削除しました。');
-  renderCustomerList();
+  await renderCustomers();
+  await renderTodayPanel();
+  await renderWeekView();
+  if (document.getElementById('day-view-section').classList.contains('active')) {
+    await renderTimeline(selectedDate);
+  }
+  refreshCalendar();
 }
 
 async function autoBackup() {
-  const reservations = await getAllReservations();
-  const customers    = await getAllCustomers();
-  localStorage.setItem('barber_auto_backup', JSON.stringify({
-    reservations, customers, timestamp: new Date().toISOString()
-  }));
+  try {
+    const reservations = await getAllReservations();
+    const customers = await getAllCustomers();
+    localStorage.setItem('barber_auto_backup', JSON.stringify({
+      reservations, customers, timestamp: new Date().toISOString()
+    }));
+  } catch (error) {
+    console.warn('自動バックアップを保存できませんでした:', error);
+  }
 }
