@@ -1,10 +1,10 @@
-<!-- ▼ ここから：アイコン設定（予約管理）。</head> の直前に貼り付け ▼ -->
-<link rel="icon" href="./favicon.ico" sizes="any">
-<link rel="icon" href="./icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="./apple-touch-icon.png">
-<link rel="manifest" href="./manifest.webmanifest">
-<meta name="theme-color" content="#3A86C8">
+<!-- ▼ 予約管理アイコン設定 v2：</head> の直前に貼り付け ▼ -->
+<link rel="icon" href="./reservation-favicon.ico" sizes="any">
+<link rel="icon" href="./reservation-icon.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="./reservation-favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./reservation-apple-touch-icon.png">
+<link rel="manifest" href="./manifest.webmanifest?v=20260704-2">
+<meta name="theme-color" content="#0C394C">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="予約">
 <!-- ▲ ここまで ▲ -->

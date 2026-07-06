@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>理容室予約管理 v1.0.1</title>
-<!-- App icons / PWA -->
-<link rel="icon" href="./favicon.ico?v=20260704" sizes="any">
-<link rel="icon" href="./icon.svg?v=20260704" type="image/svg+xml">
-<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png?v=20260704">
-<link rel="icon" type="image/png" sizes="16x16" href="./favicon-16.png?v=20260704">
-<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=20260704">
-<link rel="manifest" href="./manifest.webmanifest?v=20260704">
-<meta name="theme-color" content="#3A86C8">
+<title>理容室予約管理 v1.0.2</title>
+<!-- App icons / PWA（シンプルアイコン） -->
+<link rel="icon" href="./favicon.ico" sizes="any">
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="./favicon-16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+<link rel="manifest" href="./manifest.webmanifest?v=20260706">
+<meta name="theme-color" content="#0C394C">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="予約">
@@ -269,6 +269,119 @@ tr:hover td { background: var(--accent-light); }
 .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--primary); color: white; padding: 10px 20px; border-radius: 20px; font-size: 13px; font-weight: 700; z-index: 1000; opacity: 0; transition: opacity 0.3s; pointer-events: none; white-space: nowrap; }
 .toast.show { opacity: 1; }
 
+/* 開始時間スピナー */
+.time-spinner { display: flex; align-items: stretch; gap: 8px; max-width: 100%; flex-wrap: wrap; }
+.time-spinner .spin-btn {
+  flex: 0 0 auto;
+  width: 46px; min-height: 44px;
+  border: 1px solid var(--border2);
+  background: var(--card);
+  border-radius: 8px;
+  font-size: 20px; font-weight: 700;
+  color: var(--accent);
+  cursor: pointer; user-select: none;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.12s;
+}
+.time-spinner .spin-btn:hover { background: var(--accent-light); }
+.time-spinner .spin-btn:active { background: var(--accent); color: #fff; }
+.time-spinner .time-display {
+  flex: 1 1 90px; min-width: 0;
+  text-align: center;
+  font-size: 22px; font-weight: 700; letter-spacing: 0.04em;
+  border: 1px solid var(--border2); border-radius: 8px;
+  padding: 8px 6px; background: white;
+}
+.time-spinner .form-input[type="time"] {
+  flex: 1 1 120px; min-width: 0; width: auto;
+}
+.time-hint { font-size: 11px; color: var(--muted); margin-top: 5px; min-height: 15px; }
+.time-hint.warn { color: var(--red); font-weight: 700; }
+
+/* 顧客検索（予約モーダル内） */
+.cust-search-wrap { position: relative; }
+.cust-suggest {
+  position: absolute; left: 0; right: 0; top: 100%;
+  background: white; border: 1px solid var(--border2); border-top: none;
+  border-radius: 0 0 8px 8px;
+  max-height: 200px; overflow-y: auto;
+  z-index: 30; display: none;
+  box-shadow: 0 6px 16px rgba(0,0,0,0.12);
+}
+.cust-suggest.open { display: block; }
+.cust-suggest-item {
+  padding: 10px 12px; font-size: 14px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+}
+.cust-suggest-item:last-child { border-bottom: none; }
+.cust-suggest-item:hover, .cust-suggest-item.active { background: var(--accent-light); }
+.cust-suggest-item .cs-phone { font-size: 11px; color: var(--muted); margin-left: 6px; }
+.cust-suggest-empty { padding: 10px 12px; font-size: 13px; color: var(--muted); }
+.selected-cust {
+  display: none; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 9px 12px; background: var(--accent-light);
+  border: 1px solid var(--accent); border-radius: 8px; margin-top: 6px;
+}
+.selected-cust.show { display: flex; }
+.selected-cust .sc-name { font-weight: 700; font-size: 14px; }
+.selected-cust .sc-clear {
+  background: none; border: none; color: var(--muted);
+  font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px;
+}
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+/* 施術メニュー編集（設定） */
+.menu-edit-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.menu-edit-row:last-of-type { border-bottom: none; }
+.menu-edit-row .me-name { flex: 2 1 120px; min-width: 90px; }
+.menu-edit-row .me-time { flex: 1 1 70px; min-width: 60px; max-width: 90px; }
+.menu-edit-row .me-price { flex: 1 1 80px; min-width: 70px; max-width: 110px; }
+.menu-edit-row .me-input {
+  padding: 7px 9px; border: 1px solid var(--border2); border-radius: 6px;
+  font-family: inherit; font-size: 13px; background: white; width: 100%; outline: none;
+}
+.menu-edit-row .me-input:focus { border-color: var(--accent); }
+.menu-edit-row .me-order { display: flex; flex-direction: column; gap: 2px; }
+.menu-edit-row .me-ord-btn {
+  width: 26px; height: 20px; border: 1px solid var(--border2); background: var(--card);
+  border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--accent);
+  display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.menu-edit-row .me-ord-btn:disabled { opacity: 0.3; cursor: default; }
+.menu-edit-row .me-del {
+  border: none; background: var(--red); color: #fff; border-radius: 6px;
+  width: 30px; height: 30px; cursor: pointer; font-size: 14px; flex: 0 0 auto;
+}
+.menu-add-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1.5px dashed var(--border2); }
+.menu-add-field { display: flex; flex-direction: column; gap: 3px; }
+.menu-add-field label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.menu-add-field input {
+  padding: 8px 10px; border: 1px solid var(--border2); border-radius: 6px;
+  font-family: inherit; font-size: 13px; background: white; outline: none;
+}
+.menu-add-field.f-name input { width: 130px; max-width: 40vw; }
+.menu-add-field.f-num input { width: 80px; }
+
+/* 本日の空き時間（ダッシュボード） */
+.free-panel {
+  background: var(--surface);
+  border: 1.5px solid var(--green);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.free-panel-title { font-size: 14px; font-weight: 700; color: #1e8449; margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.free-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.free-chip {
+  background: rgba(39,174,96,0.12); border: 1px solid rgba(39,174,96,0.5);
+  color: #1e8449; font-weight: 700; font-size: 12px;
+  padding: 5px 10px; border-radius: 14px; white-space: nowrap;
+}
+.free-empty { font-size: 13px; color: var(--muted); }
+
 @media (max-width: 640px) {
   header { padding: 0 10px; }
   .header-title { font-size: 13px; }
@@ -294,6 +407,12 @@ tr:hover td { background: var(--accent-light); }
 <main>
   <!-- カレンダー -->
   <section id="calendar" class="active">
+    <!-- 本日の空き時間（ダッシュボード上部） -->
+    <div class="free-panel" id="free-panel">
+      <div class="free-panel-title">🟢 本日の空き時間</div>
+      <div id="free-slots-list"><span class="free-empty">読み込み中...</span></div>
+    </div>
+
     <!-- TODAY パネル（常時表示） -->
     <div class="today-panel" id="today-panel">
       <div class="today-panel-header">
@@ -388,11 +507,37 @@ tr:hover td { background: var(--accent-light); }
     </div>
     <div class="card">
       <h3>アプリ情報</h3>
-      <p>バージョン 1.0.1（バグ修正版）</p>
+      <p style="margin-bottom:14px;">バージョン <strong>1.0.2</strong></p>
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Ver1.0.2 更新内容</div>
+      <ul style="margin:0 0 4px 18px;font-size:12px;color:var(--muted);line-height:1.9;">
+        <li>新規予約画面に5分刻みの開始時間スピナー（▲▼）を追加</li>
+        <li>新規予約画面に顧客検索機能を追加</li>
+        <li>新規予約画面に顧客登録ボタンを追加（予約入力中でも登録可）</li>
+        <li>開始時間入力欄のレイアウト崩れを修正</li>
+        <li>設定画面に施術メニューの編集・並べ替え機能を追加</li>
+        <li>ダッシュボードに本日の空き時間表示を追加</li>
+        <li>軽微な不具合修正と表示調整</li>
+      </ul>
     </div>
     <div class="card">
-      <h3>施術メニュー（所要時間）</h3>
-      <div id="menu-list-display"></div>
+      <h3>施術メニュー（名前・時間・料金の編集）</h3>
+      <p style="font-size:12px;">編集後、既存の予約データはそのまま残ります（過去の予約に登録済みのメニュー名は書き換えません）。</p>
+      <div id="menu-edit-list"></div>
+      <div class="menu-add-row">
+        <div class="menu-add-field f-name">
+          <label>メニュー名</label>
+          <input type="text" id="new-menu-name" placeholder="例：眉カット">
+        </div>
+        <div class="menu-add-field f-num">
+          <label>所要(分)</label>
+          <input type="number" id="new-menu-time" min="1" step="5" placeholder="20">
+        </div>
+        <div class="menu-add-field f-num">
+          <label>料金(円)</label>
+          <input type="number" id="new-menu-price" min="0" step="100" placeholder="0">
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="addMenuItem()">＋ 追加</button>
+      </div>
     </div>
     <div class="card" style="border:1.5px solid #e74c3c;">
       <h3 style="color:#c0392b;">⚠️ データ削除</h3>
@@ -428,13 +573,30 @@ tr:hover td { background: var(--accent-light); }
     <div class="modal-title" id="reservation-modal-title">新規予約</div>
     <form id="reservation-form" onsubmit="handleReservationSubmit(event)">
       <input type="hidden" id="res-id">
+      <input type="hidden" id="res-customer-id">
       <div class="form-group">
         <label class="form-label">顧客</label>
-        <select class="form-select" id="res-customer-id" required></select>
+        <div class="cust-search-wrap">
+          <input type="text" class="form-input" id="res-cust-search" placeholder="名前・電話番号で検索" autocomplete="off"
+                 oninput="onCustSearchInput()" onfocus="onCustSearchInput()">
+          <div class="cust-suggest" id="res-cust-suggest"></div>
+        </div>
+        <div class="selected-cust" id="res-cust-selected">
+          <span class="sc-name" id="res-cust-selected-name"></span>
+          <button type="button" class="sc-clear" onclick="clearSelectedCustomer()" title="選択を解除">✕</button>
+        </div>
+        <div class="row-btns">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="openCustomerModalFromReservation()">＋ 新規顧客登録</button>
+        </div>
       </div>
       <div class="form-group">
-        <label class="form-label">開始時間</label>
-        <input type="time" class="form-input" id="res-start-time" step="300" required>
+        <label class="form-label">開始時間（▼5分戻す／▲5分進める）</label>
+        <div class="time-spinner">
+          <button type="button" class="spin-btn" onclick="stepStartTime(-5)" aria-label="5分戻す">▼</button>
+          <input type="time" class="form-input" id="res-start-time" step="300" required oninput="onStartTimeChange()">
+          <button type="button" class="spin-btn" onclick="stepStartTime(5)" aria-label="5分進める">▲</button>
+        </div>
+        <div class="time-hint" id="time-hint"></div>
       </div>
       <div class="form-group">
         <label class="form-label">メニュー（複数選択可）</label>

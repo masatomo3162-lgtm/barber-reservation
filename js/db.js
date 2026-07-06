@@ -1,5 +1,5 @@
 const DB_NAME = 'BarberAppDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let db;
 
@@ -29,6 +29,10 @@ function initDB() {
             }
             if (!openedDB.objectStoreNames.contains('reservations')) {
                 openedDB.createObjectStore('reservations', { keyPath: 'id', autoIncrement: true });
+            }
+            // v2: 施術メニューを永続化するストア（既存データには影響しない）
+            if (!openedDB.objectStoreNames.contains('menus')) {
+                openedDB.createObjectStore('menus', { keyPath: 'id', autoIncrement: true });
             }
         };
 
@@ -90,4 +94,21 @@ async function clearReservations() {
     const transaction = db.transaction(['reservations'], 'readwrite');
     transaction.objectStore('reservations').clear();
     return transactionToPromise(transaction);
+}
+
+// ===== 施術メニュー（v2追加）=====
+async function getAllMenus() {
+    return requestToPromise(getStore('menus').getAll());
+}
+
+async function addMenu(menu) {
+    return requestToPromise(getStore('menus', 'readwrite').add(menu));
+}
+
+async function updateMenu(menu) {
+    return requestToPromise(getStore('menus', 'readwrite').put(menu));
+}
+
+async function deleteMenu(id) {
+    return requestToPromise(getStore('menus', 'readwrite').delete(id));
 }

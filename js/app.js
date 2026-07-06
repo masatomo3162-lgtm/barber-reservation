@@ -23,25 +23,55 @@ const BLOCK_COLORS = [
   '#16a085','#546e7a','#e67e22','#2980b9','#884ea0',
 ];
 
+// 営業時間（START_HOUR基準の分）: 8:00=0 〜 19:00=660
+const BUSINESS_START_MIN = 0;
+const BUSINESS_END_MIN   = (END_HOUR - START_HOUR) * 60;
+
 // ===== 状態 =====
 let calendar;
 let selectedDate      = todayStr();
 let dragOffsetMin     = 0;
 let currentDetailId   = null;   // 予約詳細モーダル用
 let currentDetailCustomerId = null;
+let menuList          = [];     // 施術メニュー（IndexedDBから読み込む実データ）
+let custSuggestActive = -1;     // 顧客検索候補のキーボード選択位置
+let reopenReservationAfterCustomer = false; // 予約入力中に顧客登録した場合の復帰フラグ
 
 // ===== 起動 =====
 document.addEventListener('DOMContentLoaded', async () => {
   await initDB();
+  await loadMenus();
   initCalendar();
   buildMenuGrid();
-  buildMenuDisplay();
+  renderMenuEditList();
   renderCustomers();
   renderTodayPanel();
+  renderFreeSlots();
   renderWeekView();
   document.getElementById('customer-search')
     .addEventListener('input', e => renderCustomers(e.target.value));
+  // 予約モーダルの顧客検索候補を、外側クリックで閉じる
+  document.addEventListener('click', e => {
+    const wrap = document.querySelector('.cust-search-wrap');
+    if (wrap && !wrap.contains(e.target)) {
+      document.getElementById('res-cust-suggest').classList.remove('open');
+    }
+  });
 });
+
+// ===== 施術メニュー（DB読み込み・初期投入）=====
+async function loadMenus() {
+  let stored = await getAllMenus();
+  if (!stored || stored.length === 0) {
+    // 初回のみ、既定メニューをDBに投入
+    for (let i = 0; i < MENUS.length; i++) {
+      const m = MENUS[i];
+      await addMenu({ label: m.label, time: m.time, price: 0, order: i });
+    }
+    stored = await getAllMenus();
+  }
+  menuList = stored.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+}
 
 // ===== ユーティリティ =====
 function todayStr() {
@@ -127,8 +157,56 @@ function refreshCalendar() {
   if (calendar) calendar.refetchEvents();
 }
 
+// ===== 本日の空き時間（ダッシュボード）=====
+async function renderFreeSlots() {
+  const el = document.getElementById('free-slots-list');
+  if (!el) return;
+  const today = todayStr();
+  const OPEN_START = (9  - START_HOUR) * 60;  // 9:00
+  const OPEN_END   = (19 - START_HOUR) * 60;  // 19:00
+
+  const reservations = await getAllReservations();
+  const dayRes = reservations.filter(r => r.date === today);
+
+  // 現在時刻（今日基準・分）を5分単位に切り上げ。過去の時間帯は空きに含めない
+  const now = new Date();
+  let nowMin = (now.getHours() - START_HOUR) * 60 + now.getMinutes();
+  nowMin = Math.ceil(nowMin / 5) * 5;
+  const effectiveStart = Math.max(OPEN_START, nowMin);
+
+  if (effectiveStart >= OPEN_END) {
+    el.innerHTML = '<span class="free-empty">本日の営業時間は終了しました</span>';
+    return;
+  }
+
+  const busy = dayRes.map(r => {
+    const s = timeToMin(r.startTime);
+    return { s, e: s + (Number(r.duration) || 0) + INTERVAL };
+  }).filter(b => b.e > effectiveStart && b.s < OPEN_END)
+    .sort((a, b) => a.s - b.s);
+
+  const free = [];
+  let cursor = effectiveStart;
+  for (const b of busy) {
+    const blockStart = Math.max(b.s, effectiveStart);
+    if (cursor < blockStart) free.push({ s: cursor, e: blockStart });
+    cursor = Math.max(cursor, b.e);
+  }
+  if (cursor < OPEN_END) free.push({ s: cursor, e: OPEN_END });
+
+  const shown = free.filter(f => f.e - f.s >= 5); // 5分未満は表示しない
+  if (!shown.length) {
+    el.innerHTML = '<span class="free-empty">本日の空き時間はありません</span>';
+    return;
+  }
+  el.innerHTML = '<div class="free-chips">' + shown.map(f =>
+    `<span class="free-chip">${minToTime(f.s)}〜${minToTime(f.e)}</span>`
+  ).join('') + '</div>';
+}
+
 // ===== TODAY パネル =====
 async function renderTodayPanel() {
+  renderFreeSlots();
   const today = todayStr();
   const d = new Date(today+'T00:00:00');
   document.getElementById('today-panel-title').textContent =
@@ -479,12 +557,16 @@ async function renderTimeline(date) {
 function buildMenuGrid() {
   const grid = document.getElementById('menu-grid');
   grid.innerHTML = '';
-  MENUS.forEach(m => {
+  if (!menuList.length) {
+    grid.innerHTML = '<div style="grid-column:1/-1;font-size:12px;color:var(--muted);">メニューが登録されていません。設定画面で追加してください。</div>';
+    return;
+  }
+  menuList.forEach(m => {
     const item = document.createElement('label');
     item.className = 'menu-item';
     item.innerHTML = `
-      <input type="checkbox" name="menu" value="${m.key}" data-time="${m.time}" data-label="${m.label}">
-      <div><div class="menu-item-name">${m.label}</div><div class="menu-item-time">${m.time}分</div></div>
+      <input type="checkbox" name="menu" value="${m.id}" data-time="${m.time}" data-label="${escapeHTML(m.label)}">
+      <div><div class="menu-item-name">${escapeHTML(m.label)}</div><div class="menu-item-time">${m.time}分</div></div>
     `;
     const cb = item.querySelector('input');
     cb.addEventListener('change', () => {
@@ -499,6 +581,7 @@ function updateTotalTime() {
   const total = Array.from(document.querySelectorAll('#menu-grid input[name="menu"]:checked'))
     .reduce((s,cb) => s+parseInt(cb.dataset.time), 0);
   document.getElementById('res-total-time').textContent = total;
+  onStartTimeChange();
 }
 
 function openReservationModal() {
@@ -511,7 +594,8 @@ function openReservationModal() {
     cb.closest('.menu-item').classList.remove('checked');
   });
   updateTotalTime();
-  renderCustomerSelect();
+  clearSelectedCustomer();
+  onStartTimeChange();
   document.getElementById('reservation-modal').classList.add('open');
 }
 
@@ -528,21 +612,129 @@ async function editReservation(id) {
     cb.closest('.menu-item').classList.toggle('checked', cb.checked);
   });
   updateTotalTime();
-  await renderCustomerSelect(res.customerId);
+  await setSelectedCustomer(res.customerId);
+  onStartTimeChange();
   document.getElementById('reservation-modal').classList.add('open');
 }
 
-async function renderCustomerSelect(selectedId) {
+// ===== 顧客選択（検索式）=====
+function normalizeKana(s) {
+  // カタカナをひらがなに寄せて検索しやすくする（漢字の読みまではデータが無いので対象外）
+  return String(s || '').toLowerCase().replace(/[\u30a1-\u30f6]/g, ch =>
+    String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+
+async function setSelectedCustomer(customerId) {
   const customers = await getAllCustomers();
-  const sel = document.getElementById('res-customer-id');
-  sel.innerHTML = '<option value="">顧客を選択してください</option>';
-  customers.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.id;
-    opt.textContent = c.name + (c.phone ? ` （${c.phone}）` : '');
-    if (c.id === selectedId) opt.selected = true;
-    sel.appendChild(opt);
-  });
+  const c = customers.find(x => x.id === customerId);
+  if (!c) { clearSelectedCustomer(); return; }
+  document.getElementById('res-customer-id').value = c.id;
+  document.getElementById('res-cust-selected-name').textContent =
+    c.name + (c.phone ? `（${c.phone}）` : '');
+  document.getElementById('res-cust-selected').classList.add('show');
+  const searchEl = document.getElementById('res-cust-search');
+  searchEl.value = '';
+  searchEl.style.display = 'none';
+  document.getElementById('res-cust-suggest').classList.remove('open');
+}
+
+function clearSelectedCustomer() {
+  document.getElementById('res-customer-id').value = '';
+  const box = document.getElementById('res-cust-selected');
+  const searchEl = document.getElementById('res-cust-search');
+  const suggest = document.getElementById('res-cust-suggest');
+  if (box) box.classList.remove('show');
+  if (searchEl) { searchEl.value = ''; searchEl.style.display = ''; searchEl.focus(); }
+  if (suggest) { suggest.classList.remove('open'); suggest.innerHTML = ''; }
+}
+
+async function onCustSearchInput() {
+  const searchEl = document.getElementById('res-cust-search');
+  const suggest = document.getElementById('res-cust-suggest');
+  const raw = searchEl.value.trim();
+  const q = normalizeKana(raw);
+  const customers = await getAllCustomers();
+
+  if (!customers.length) {
+    suggest.innerHTML = '<div class="cust-suggest-empty">顧客が登録されていません</div>';
+    suggest.classList.add('open');
+    return;
+  }
+  const matches = !q
+    ? customers.slice(0, 30)
+    : customers.filter(c =>
+        normalizeKana(c.name).includes(q) ||
+        normalizeKana(c.phone).includes(q));
+
+  if (!matches.length) {
+    suggest.innerHTML = '<div class="cust-suggest-empty">該当する顧客がいません</div>';
+    suggest.classList.add('open');
+    return;
+  }
+  suggest.innerHTML = matches.map(c =>
+    `<div class="cust-suggest-item" onclick="selectCustomerFromSuggest(${c.id})">
+      ${escapeHTML(c.name)}${c.phone ? `<span class="cs-phone">${escapeHTML(c.phone)}</span>` : ''}
+    </div>`
+  ).join('');
+  suggest.classList.add('open');
+}
+
+async function selectCustomerFromSuggest(id) {
+  await setSelectedCustomer(id);
+}
+
+function openCustomerModalFromReservation() {
+  // 予約入力中の内容（メニュー・時間・料金）はそのまま保持し、顧客モーダルを重ねて開く
+  reopenReservationAfterCustomer = true;
+  openCustomerModal();
+}
+
+// ===== 開始時間スピナー =====
+function stepStartTime(deltaMin) {
+  const el = document.getElementById('res-start-time');
+  let cur = (el.value && /^\d{2}:\d{2}$/.test(el.value)) ? timeToMin(el.value) : 60;
+  cur += deltaMin;
+  cur = Math.max(BUSINESS_START_MIN, Math.min(cur, BUSINESS_END_MIN));
+  el.value = minToTime(cur);
+  onStartTimeChange();
+}
+
+async function onStartTimeChange() {
+  const el = document.getElementById('res-start-time');
+  const hint = document.getElementById('time-hint');
+  if (!el || !hint) return;
+  if (!el.value || !/^\d{2}:\d{2}$/.test(el.value)) { hint.textContent = ''; hint.className = 'time-hint'; return; }
+  let min = timeToMin(el.value);
+  if (min < BUSINESS_START_MIN) { min = BUSINESS_START_MIN; el.value = minToTime(min); }
+  if (min > BUSINESS_END_MIN)   { min = BUSINESS_END_MIN;   el.value = minToTime(min); }
+
+  const total = Array.from(document.querySelectorAll('#menu-grid input[name="menu"]:checked'))
+    .reduce((s, cb) => s + parseInt(cb.dataset.time, 10), 0);
+
+  const idValue = document.getElementById('res-id').value;
+  const editId = idValue ? parseInt(idValue, 10) : null;
+  let date = selectedDate;
+  if (editId) {
+    const all = await getAllReservations();
+    const ex = all.find(r => r.id === editId);
+    if (ex) date = ex.date;
+  }
+
+  if (total > 0 && min + total + INTERVAL > BUSINESS_END_MIN) {
+    hint.textContent = `⚠ 施術終了が営業終了（${minToTime(BUSINESS_END_MIN)}）を超えます`;
+    hint.className = 'time-hint warn';
+    return;
+  }
+  if (total > 0) {
+    const conflict = await findReservationConflict(date, el.value, total, editId);
+    if (conflict) {
+      hint.textContent = `⚠ ${conflict.startTime} 開始の予約と重なっています`;
+      hint.className = 'time-hint warn';
+      return;
+    }
+  }
+  hint.textContent = `${el.value} 開始`;
+  hint.className = 'time-hint';
 }
 
 async function handleReservationSubmit(e) {
@@ -666,13 +858,19 @@ async function openCustomerEdit(id) {
 
 async function handleCustomerSubmit(e) {
   e.preventDefault();
+  // 予約起点かどうかを先に確保（closeModalでフラグが消えても影響しないように）
+  const fromReservation = reopenReservationAfterCustomer;
+  reopenReservationAfterCustomer = false;
+
   const id = document.getElementById('cust-id').value;
-  const customer = {
-    name: document.getElementById('cust-name').value,
-    phone: document.getElementById('cust-phone').value,
-    note: document.getElementById('cust-note').value,
-    updatedAt: new Date().toISOString(),
-  };
+  const name = document.getElementById('cust-name').value.trim();
+  const phone = document.getElementById('cust-phone').value.trim();
+  const note = document.getElementById('cust-note').value;
+  if (!name) { alert('名前を入力してください'); reopenReservationAfterCustomer = fromReservation; return; }
+
+  const customer = { name, phone, note, updatedAt: new Date().toISOString() };
+  let savedId;
+
   if (id) {
     const customerId = parseInt(id, 10);
     const existingCustomers = await getAllCustomers();
@@ -680,16 +878,38 @@ async function handleCustomerSubmit(e) {
     customer.id = customerId;
     customer.createdAt = existing && existing.createdAt ? existing.createdAt : new Date().toISOString();
     await updateCustomer(customer);
+    savedId = customerId;
     showToast('顧客情報を更新しました');
   } else {
+    // 重複チェック（新規登録のみ）：同名または電話番号一致で確認
+    const existingCustomers = await getAllCustomers();
+    const dupName = existingCustomers.find(c => c.name === name);
+    const dupPhone = phone ? existingCustomers.find(c => (c.phone || '') === phone) : null;
+    if (dupName || dupPhone) {
+      const who = dupName || dupPhone;
+      const kind = dupName ? '名前' : '電話番号';
+      const proceed = confirm(
+        `同じ${kind}の顧客「${who.name}」が既に登録されています。\n` +
+        `「OK」＝別人として新規登録\n「キャンセル」＝既存の顧客を使う`
+      );
+      if (!proceed) {
+        // 既存顧客を使う。予約起点ならその顧客を反映
+        closeModal('customer-modal');
+        if (fromReservation) await setSelectedCustomer(who.id);
+        return;
+      }
+    }
     customer.createdAt = new Date().toISOString();
-    await addCustomer(customer);
+    savedId = await addCustomer(customer);
     showToast('顧客を登録しました');
   }
+
   await autoBackup();
   closeModal('customer-modal');
   renderCustomers();
   if (currentDetailCustomerId) showCustomerDetail(currentDetailCustomerId);
+  // 予約入力中に顧客登録した場合、その顧客を予約に反映
+  if (fromReservation) await setSelectedCustomer(savedId);
 }
 
 async function handleCustomerDelete() {
@@ -736,12 +956,99 @@ function openCustomerEditFromDetail() {
 }
 
 // ===== 設定・CSV =====
-function buildMenuDisplay() {
-  const el = document.getElementById('menu-list-display');
-  el.innerHTML = MENUS.map(m=>
-    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
-      <span>${m.label}</span><span style="color:var(--muted);">${m.time}分</span></div>`
-  ).join('') + `<div style="padding:6px 0;font-size:13px;color:var(--muted);">インターバル: ${INTERVAL}分</div>`;
+function renderMenuEditList() {
+  const el = document.getElementById('menu-edit-list');
+  if (!el) return;
+  if (!menuList.length) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--muted);padding:8px 0;">メニューがありません。下のフォームから追加してください。</div>';
+    return;
+  }
+  el.innerHTML = '';
+  menuList.forEach((m, idx) => {
+    const row = document.createElement('div');
+    row.className = 'menu-edit-row';
+    row.innerHTML = `
+      <div class="me-order">
+        <button type="button" class="me-ord-btn" ${idx === 0 ? 'disabled' : ''} onclick="moveMenuItem(${m.id},-1)" title="上へ">▲</button>
+        <button type="button" class="me-ord-btn" ${idx === menuList.length - 1 ? 'disabled' : ''} onclick="moveMenuItem(${m.id},1)" title="下へ">▼</button>
+      </div>
+      <input class="me-input me-name" type="text" value="${escapeHTML(m.label)}" onchange="updateMenuItem(${m.id},'label',this.value)" placeholder="メニュー名">
+      <input class="me-input me-time" type="number" min="1" step="5" value="${m.time}" onchange="updateMenuItem(${m.id},'time',this.value)" title="所要時間(分)">
+      <input class="me-input me-price" type="number" min="0" step="100" value="${m.price || 0}" onchange="updateMenuItem(${m.id},'price',this.value)" title="料金(円)">
+      <button type="button" class="me-del" onclick="deleteMenuItem(${m.id})" title="削除">✕</button>
+    `;
+    el.appendChild(row);
+  });
+}
+
+async function addMenuItem() {
+  const nameEl = document.getElementById('new-menu-name');
+  const timeEl = document.getElementById('new-menu-time');
+  const priceEl = document.getElementById('new-menu-price');
+  const name = nameEl.value.trim();
+  const time = parseInt(timeEl.value, 10);
+  const price = Math.max(0, parseInt(priceEl.value, 10) || 0);
+  if (!name) { alert('メニュー名を入力してください'); return; }
+  if (!Number.isFinite(time) || time <= 0) { alert('所要時間を正しく入力してください（1分以上）'); return; }
+  if (menuList.some(m => m.label === name)) {
+    if (!confirm(`「${name}」は既に存在します。それでも追加しますか？`)) return;
+  }
+  const maxOrder = menuList.reduce((mx, m) => Math.max(mx, m.order ?? 0), -1);
+  await addMenu({ label: name, time, price, order: maxOrder + 1 });
+  await loadMenus();
+  buildMenuGrid();
+  renderMenuEditList();
+  nameEl.value = ''; timeEl.value = ''; priceEl.value = '';
+  await autoBackup();
+  showToast('メニューを追加しました');
+}
+
+async function updateMenuItem(id, field, value) {
+  const m = menuList.find(x => x.id === id);
+  if (!m) return;
+  if (field === 'label') {
+    const name = String(value).trim();
+    if (!name) { showToast('メニュー名は空にできません'); renderMenuEditList(); return; }
+    m.label = name;
+  } else if (field === 'time') {
+    const t = parseInt(value, 10);
+    if (!Number.isFinite(t) || t <= 0) { showToast('所要時間は1分以上にしてください'); renderMenuEditList(); return; }
+    m.time = t;
+  } else if (field === 'price') {
+    m.price = Math.max(0, parseInt(value, 10) || 0);
+  }
+  await updateMenu(m);
+  buildMenuGrid(); // 予約画面のメニュー時間を最新化（フォーカスは保つため一覧は再描画しない）
+  await autoBackup();
+  showToast('メニューを更新しました');
+}
+
+async function deleteMenuItem(id) {
+  const m = menuList.find(x => x.id === id);
+  if (!m) return;
+  if (!confirm(`「${m.label}」を削除しますか？\n（このメニューを使った過去の予約データはそのまま残ります）`)) return;
+  await deleteMenu(id);
+  await loadMenus();
+  buildMenuGrid();
+  renderMenuEditList();
+  await autoBackup();
+  showToast('メニューを削除しました');
+}
+
+async function moveMenuItem(id, dir) {
+  const idx = menuList.findIndex(x => x.id === id);
+  if (idx < 0) return;
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= menuList.length) return;
+  const a = menuList[idx], b = menuList[swapIdx];
+  const ao = a.order ?? idx, bo = b.order ?? swapIdx;
+  a.order = bo; b.order = ao;
+  await updateMenu(a);
+  await updateMenu(b);
+  await loadMenus();
+  buildMenuGrid();
+  renderMenuEditList();
+  await autoBackup();
 }
 
 // --- CSV共通 ---
@@ -971,10 +1278,16 @@ function showSection(id, btn) {
 
 function closeModal(id) {
   document.getElementById(id).classList.remove('open');
+  if (id === 'customer-modal') reopenReservationAfterCustomer = false;
 }
 
 document.querySelectorAll('.modal-backdrop').forEach(bd => {
-  bd.addEventListener('click', e => { if (e.target===bd) bd.classList.remove('open'); });
+  bd.addEventListener('click', e => {
+    if (e.target === bd) {
+      bd.classList.remove('open');
+      if (bd.id === 'customer-modal') reopenReservationAfterCustomer = false;
+    }
+  });
 });
 
 // ===== データ全削除 =====
@@ -1013,8 +1326,9 @@ async function autoBackup() {
   try {
     const reservations = await getAllReservations();
     const customers = await getAllCustomers();
+    const menus = await getAllMenus();
     localStorage.setItem('barber_auto_backup', JSON.stringify({
-      reservations, customers, timestamp: new Date().toISOString()
+      reservations, customers, menus, timestamp: new Date().toISOString()
     }));
   } catch (error) {
     console.warn('自動バックアップを保存できませんでした:', error);

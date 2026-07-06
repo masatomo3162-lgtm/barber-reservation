@@ -1,9 +1,17 @@
-const CACHE_NAME = 'barber-app-icon-20260704';
+const CACHE_NAME = 'barber-app-v1.0.2-20260706b';
 const LOCAL_ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './manifest.json',
+  './reservation-favicon.ico',
+  './reservation-favicon-16.png',
+  './reservation-favicon-32.png',
+  './reservation-icon.svg',
+  './reservation-apple-touch-icon.png',
+  './reservation-icon-192.png',
+  './reservation-icon-512.png',
+  './reservation-icon-512-maskable.png',
   './favicon.ico',
   './favicon-16.png',
   './favicon-32.png',
