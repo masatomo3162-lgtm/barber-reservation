@@ -112,3 +112,10 @@ async function updateMenu(menu) {
 async function deleteMenu(id) {
     return requestToPromise(getStore('menus', 'readwrite').delete(id));
 }
+
+
+async function clearMenus() {
+    const transaction = db.transaction(['menus'], 'readwrite');
+    transaction.objectStore('menus').clear();
+    return transactionToPromise(transaction);
+}

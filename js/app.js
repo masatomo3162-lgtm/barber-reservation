@@ -27,10 +27,33 @@ const BLOCK_COLORS = [
 const BUSINESS_START_MIN = 0;
 const BUSINESS_END_MIN   = (END_HOUR - START_HOUR) * 60;
 
+// ===== iPad/Safari互換ヘルパー =====
+// 古いiPad Safariでアプリ全体が止まる原因になりやすい新しめの記法を避ける
+// + 初期化エラーを画面に出して原因を追いやすくする
+function valueOrDefault(value, fallback) {
+  return value === null || value === undefined ? fallback : value;
+}
+function pad2(value) {
+  value = String(value);
+  return value.length >= 2 ? value : '0' + value;
+}
+function showAppError(error) {
+  console.error(error);
+  const main = document.querySelector('main');
+  if (!main) return;
+  const msg = error && error.message ? error.message : String(error);
+  const box = document.createElement('div');
+  box.style.cssText = 'background:#fff3f3;border:2px solid #c0392b;color:#7b1d14;border-radius:10px;padding:14px;margin:12px 0;font-size:13px;line-height:1.7;';
+  box.innerHTML = '<strong>アプリの読み込み中にエラーが発生しました。</strong><br>' +
+    escapeHTML(msg) + '<br><span style="color:#888;">ページを再読み込みしてください。iPadの場合はSafariのキャッシュ削除、またはホーム画面アイコンの作り直しも試してください。</span>';
+  main.insertBefore(box, main.firstChild);
+}
+
 // ===== 状態 =====
 let calendar;
 let selectedDate      = todayStr();
 let dragOffsetMin     = 0;
+let touchDragState    = null; // iPad等のタッチ操作で予約を移動するための状態
 let currentDetailId   = null;   // 予約詳細モーダル用
 let currentDetailCustomerId = null;
 let menuList          = [];     // 施術メニュー（IndexedDBから読み込む実データ）
@@ -39,6 +62,7 @@ let reopenReservationAfterCustomer = false; // 予約入力中に顧客登録し
 
 // ===== 起動 =====
 document.addEventListener('DOMContentLoaded', async () => {
+  try {
   await initDB();
   await loadMenus();
   initCalendar();
@@ -57,6 +81,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       document.getElementById('res-cust-suggest').classList.remove('open');
     }
   });
+  } catch (error) {
+    showAppError(error);
+  }
 });
 
 // ===== 施術メニュー（DB読み込み・初期投入）=====
@@ -70,21 +97,21 @@ async function loadMenus() {
     }
     stored = await getAllMenus();
   }
-  menuList = stored.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  menuList = stored.sort((a, b) => valueOrDefault(a.order, 0) - valueOrDefault(b.order, 0));
 }
 
 // ===== ユーティリティ =====
 function todayStr() {
   const d = new Date();
   const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
+  const m = pad2(d.getMonth()+1);
+  const dd = pad2(d.getDate());
   return `${y}-${m}-${dd}`;
 }
 function dateToStr(d) {
   const y = d.getFullYear();
-  const m = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
+  const m = pad2(d.getMonth()+1);
+  const dd = pad2(d.getDate());
   return `${y}-${m}-${dd}`;
 }
 function minToPx(min) { return min * PX_PER_MIN; }
@@ -95,7 +122,7 @@ function timeToMin(t) {
 }
 function minToTime(min) {
   const tot = START_HOUR*60 + min;
-  return `${String(Math.floor(tot/60)).padStart(2,'0')}:${String(tot%60).padStart(2,'0')}`;
+  return `${pad2(Math.floor(tot/60))}:${pad2(tot%60)}`;
 }
 function calcEndISO(date, start, durMin) {
   const [h,m] = start.split(':').map(Number);
@@ -103,10 +130,10 @@ function calcEndISO(date, start, durMin) {
   d.setHours(h, m+durMin);
   // ローカル時刻でISO文字列を生成（UTCズレを防ぐ）
   const yy = d.getFullYear();
-  const mo = String(d.getMonth()+1).padStart(2,'0');
-  const dd = String(d.getDate()).padStart(2,'0');
-  const hh = String(d.getHours()).padStart(2,'0');
-  const mm = String(d.getMinutes()).padStart(2,'0');
+  const mo = pad2(d.getMonth()+1);
+  const dd = pad2(d.getDate());
+  const hh = pad2(d.getHours());
+  const mm = pad2(d.getMinutes());
   return `${yy}-${mo}-${dd}T${hh}:${mm}:00`;
 }
 function showToast(msg) {
@@ -121,7 +148,7 @@ function dateLabel(dateStr) {
 }
 
 function escapeHTML(value) {
-  return String(value ?? '')
+  return String(valueOrDefault(value, ''))
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -508,10 +535,76 @@ async function renderTimeline(date) {
         block.classList.remove('dragging');
         document.getElementById('drag-indicator').style.display = 'none';
       });
+
+      // iPad SafariはHTML5ドラッグが不安定なので、タッチ移動でも予約を動かせるようにする
+      block.addEventListener('touchstart', e => {
+        if (!e.touches || !e.touches.length) return;
+        const touch = e.touches[0];
+        const blockRect = block.getBoundingClientRect();
+        touchDragState = {
+          id: r.id,
+          offsetMin: pxToMin(touch.clientY - blockRect.top),
+          startY: touch.clientY,
+          moved: false,
+        };
+      }, { passive: true });
+
+      block.addEventListener('touchmove', e => {
+        if (!touchDragState || !e.touches || !e.touches.length) return;
+        const touch = e.touches[0];
+        if (Math.abs(touch.clientY - touchDragState.startY) > 8) touchDragState.moved = true;
+        if (!touchDragState.moved) return;
+        e.preventDefault();
+        const rect = resArea.getBoundingClientRect();
+        const snapped = Math.round((pxToMin(touch.clientY - rect.top) - touchDragState.offsetMin) / 5) * 5;
+        const clamped = Math.max(0, Math.min(snapped, totalMin - 10));
+        const ind = document.getElementById('drag-indicator');
+        ind.textContent = minToTime(clamped);
+        ind.style.left = (touch.clientX + 14) + 'px';
+        ind.style.top = (touch.clientY - 14) + 'px';
+        ind.style.display = 'block';
+      }, { passive: false });
+
+      block.addEventListener('touchend', async e => {
+        if (!touchDragState) return;
+        const state = touchDragState;
+        touchDragState = null;
+        document.getElementById('drag-indicator').style.display = 'none';
+        if (!state.moved || !e.changedTouches || !e.changedTouches.length) return;
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const rect = resArea.getBoundingClientRect();
+        const snapped = Math.round((pxToMin(touch.clientY - rect.top) - state.offsetMin) / 5) * 5;
+        await moveReservationToSnappedPosition(state.id, snapped, date, totalMin);
+      }, { passive: false });
+
       resArea.appendChild(block);
     });
 
-  resArea.addEventListener('dragover', e => {
+  async function moveReservationToSnappedPosition(id, snapped, dateForMove, totalMinForMove) {
+    const all = await getAllReservations();
+    const res = all.find(r => r.id === id);
+    if (!res) return;
+    const maxStart = Math.max(0, totalMinForMove - ((Number(res.duration) || 0) + INTERVAL));
+    const clamped = Math.max(0, Math.min(snapped, maxStart));
+    const newStartTime = minToTime(clamped);
+    const conflict = await findReservationConflict(dateForMove, newStartTime, Number(res.duration) || 0, id);
+    if (conflict) {
+      alert(`その時間には別の予約があります（${conflict.startTime}開始）。`);
+      await renderTimeline(dateForMove);
+      return;
+    }
+    res.startTime = newStartTime;
+    await updateReservation(res);
+    await autoBackup();
+    await renderTimeline(dateForMove);
+    await renderTodayPanel();
+    await renderWeekView();
+    refreshCalendar();
+  }
+
+  // renderTimelineを呼び直してもイベントが二重登録されないよう、on...で上書きする
+  resArea.ondragover = e => {
     e.preventDefault();
     const rect = resArea.getBoundingClientRect();
     const snapped = Math.round((pxToMin(e.clientY-rect.top)-dragOffsetMin)/5)*5;
@@ -520,35 +613,16 @@ async function renderTimeline(date) {
     ind.textContent = minToTime(clamped);
     ind.style.left = (e.clientX+14)+'px';
     ind.style.top  = (e.clientY-14)+'px';
-  });
+  };
 
-  resArea.addEventListener('drop', async e => {
+  resArea.ondrop = async e => {
     e.preventDefault();
     const id = parseInt(e.dataTransfer.getData('text/plain'));
     const rect = resArea.getBoundingClientRect();
     const snapped = Math.round((pxToMin(e.clientY-rect.top)-dragOffsetMin)/5)*5;
-    const all = await getAllReservations();
-    const res = all.find(r => r.id === id);
-    if (res) {
-      const maxStart = Math.max(0, totalMin - ((Number(res.duration) || 0) + INTERVAL));
-      const clamped = Math.max(0, Math.min(snapped, maxStart));
-      const newStartTime = minToTime(clamped);
-      const conflict = await findReservationConflict(date, newStartTime, Number(res.duration) || 0, id);
-      if (conflict) {
-        alert(`その時間には別の予約があります（${conflict.startTime}開始）。`);
-        await renderTimeline(date);
-      } else {
-        res.startTime = newStartTime;
-        await updateReservation(res);
-        await autoBackup();
-        await renderTimeline(date);
-        await renderTodayPanel();
-        await renderWeekView();
-        refreshCalendar();
-      }
-    }
+    await moveReservationToSnappedPosition(id, snapped, date, totalMin);
     document.getElementById('drag-indicator').style.display = 'none';
-  });
+  };
 
   document.getElementById('timeline-scroll').scrollTop = minToPx(timeToMin('09:00'))-40;
 }
@@ -993,7 +1067,7 @@ async function addMenuItem() {
   if (menuList.some(m => m.label === name)) {
     if (!confirm(`「${name}」は既に存在します。それでも追加しますか？`)) return;
   }
-  const maxOrder = menuList.reduce((mx, m) => Math.max(mx, m.order ?? 0), -1);
+  const maxOrder = menuList.reduce((mx, m) => Math.max(mx, valueOrDefault(m.order, 0)), -1);
   await addMenu({ label: name, time, price, order: maxOrder + 1 });
   await loadMenus();
   buildMenuGrid();
@@ -1041,7 +1115,7 @@ async function moveMenuItem(id, dir) {
   const swapIdx = idx + dir;
   if (swapIdx < 0 || swapIdx >= menuList.length) return;
   const a = menuList[idx], b = menuList[swapIdx];
-  const ao = a.order ?? idx, bo = b.order ?? swapIdx;
+  const ao = valueOrDefault(a.order, idx), bo = valueOrDefault(b.order, swapIdx);
   a.order = bo; b.order = ao;
   await updateMenu(a);
   await updateMenu(b);
@@ -1053,7 +1127,7 @@ async function moveMenuItem(id, dir) {
 
 // --- CSV共通 ---
 function csvEscape(value) {
-  const text = String(value ?? '');
+  const text = String(valueOrDefault(value, ''));
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
@@ -1101,7 +1175,7 @@ function rowsToObjects(rows) {
   const headers = rows[0].map(h => String(h || '').trim());
   return rows.slice(1).map(cols => {
     const row = {};
-    headers.forEach((header, index) => { row[header] = cols[index] ?? ''; });
+    headers.forEach((header, index) => { row[header] = valueOrDefault(cols[index], ''); });
     return row;
   });
 }
@@ -1333,4 +1407,134 @@ async function autoBackup() {
   } catch (error) {
     console.warn('自動バックアップを保存できませんでした:', error);
   }
+}
+
+
+async function exportFullBackup() {
+  try {
+    const reservations = await getAllReservations();
+    const customers = await getAllCustomers();
+    const menus = await getAllMenus();
+    const now = new Date();
+    const stamp = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}`;
+    const backup = {
+      app: 'barber-reservation',
+      version: '1.0.2-ipad-fixed',
+      exportedAt: now.toISOString(),
+      counts: {
+        reservations: reservations.length,
+        customers: customers.length,
+        menus: menus.length,
+      },
+      reservations,
+      customers,
+      menus,
+    };
+    downloadFile(JSON.stringify(backup, null, 2), `barber_backup_${stamp}.json`, 'application/json;charset=utf-8;');
+    showToast('顧客・予約を一括バックアップしました');
+  } catch (error) {
+    console.error(error);
+    alert('バックアップの作成に失敗しました。');
+  }
+}
+
+function importFullBackupJSON(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (!data || !Array.isArray(data.customers) || !Array.isArray(data.reservations)) {
+        alert('一括バックアップJSONの形式が正しくありません。');
+        return;
+      }
+      const resCount = data.reservations.length;
+      const custCount = data.customers.length;
+      const menuCount = Array.isArray(data.menus) ? data.menus.length : 0;
+      if (!confirm(`バックアップを読み込みます。\n顧客 ${custCount} 件、予約 ${resCount} 件${menuCount ? `、施術メニュー ${menuCount} 件` : ''} を現在のデータに上書きします。\nよろしいですか？`)) {
+        return;
+      }
+
+      await clearCustomers();
+      await clearReservations();
+      if (Array.isArray(data.menus)) await clearMenus();
+
+      for (const c of data.customers) {
+        const item = {
+          name: String(c.name || '').trim(),
+          phone: c.phone || '',
+          note: c.note || '',
+          createdAt: c.createdAt || new Date().toISOString(),
+          updatedAt: c.updatedAt || new Date().toISOString(),
+        };
+        if (!item.name) continue;
+        const parsedId = parseInt(c.id, 10);
+        if (Number.isInteger(parsedId) && parsedId > 0) item.id = parsedId;
+        await updateCustomer(item);
+      }
+
+      for (const r of data.reservations) {
+        const duration = parseInt(r.duration, 10);
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date || '') ||
+            !/^\d{2}:\d{2}$/.test(r.startTime || '') ||
+            !Number.isFinite(duration) || duration <= 0) {
+          continue;
+        }
+        const item = {
+          date: r.date,
+          startTime: r.startTime,
+          duration,
+          menus: Array.isArray(r.menus) ? r.menus.map(String) : [],
+          price: Math.max(0, parseInt(r.price, 10) || 0),
+          customerId: parseInt(r.customerId, 10) || null,
+          color: safeColor(r.color),
+        };
+        const parsedId = parseInt(r.id, 10);
+        if (Number.isInteger(parsedId) && parsedId > 0) item.id = parsedId;
+        await updateReservation(item);
+      }
+
+      if (Array.isArray(data.menus)) {
+        for (let i = 0; i < data.menus.length; i++) {
+          const m = data.menus[i];
+          const label = String(m.label || '').trim();
+          const time = parseInt(m.time, 10);
+          if (!label || !Number.isFinite(time) || time <= 0) continue;
+          const item = {
+            label,
+            time,
+            price: Math.max(0, parseInt(m.price, 10) || 0),
+            order: Number.isFinite(parseInt(m.order, 10)) ? parseInt(m.order, 10) : i,
+          };
+          const parsedId = parseInt(m.id, 10);
+          if (Number.isInteger(parsedId) && parsedId > 0) item.id = parsedId;
+          await updateMenu(item);
+        }
+        await loadMenus();
+        buildMenuGrid();
+        renderMenuEditList();
+      }
+
+      await autoBackup();
+      await renderCustomers();
+      await renderTodayPanel();
+      await renderWeekView();
+      if (document.getElementById('day-view-section').classList.contains('active')) {
+        await renderTimeline(selectedDate);
+      }
+      refreshCalendar();
+      showToast('一括バックアップを読み込みました');
+    } catch (error) {
+      console.error(error);
+      alert('一括バックアップの読み込みに失敗しました。ファイル内容を確認してください。');
+    } finally {
+      event.target.value = '';
+    }
+  };
+  reader.onerror = () => {
+    alert('バックアップファイルを読み込めませんでした。');
+    event.target.value = '';
+  };
+  reader.readAsText(file, 'UTF-8');
 }

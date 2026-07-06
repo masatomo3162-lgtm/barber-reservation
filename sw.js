@@ -1,4 +1,4 @@
-const CACHE_NAME = 'barber-app-v1.0.2-20260706b';
+const CACHE_NAME = 'barber-app-v1.0.2-20260706c';
 const LOCAL_ASSETS = [
   './',
   './index.html',
@@ -49,23 +49,40 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+async function networkFirst(request) {
+  const cache = await caches.open(CACHE_NAME);
+  try {
+    const response = await fetch(request, { cache: 'no-cache' });
+    if (response && response.ok) await cache.put(request, response.clone());
+    return response;
+  } catch (error) {
+    const cached = await caches.match(request, { ignoreSearch: true });
+    if (cached) return cached;
+    if (request.mode === 'navigate') return caches.match('./index.html');
+    throw error;
+  }
+}
+
+async function cacheFirst(request) {
+  const cached = await caches.match(request, { ignoreSearch: true });
+  if (cached) return cached;
+  const response = await fetch(request);
+  if (response && response.ok && new URL(request.url).protocol.startsWith('http')) {
+    const cache = await caches.open(CACHE_NAME);
+    await cache.put(request, response.clone());
+  }
+  return response;
+}
+
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
-  event.respondWith((async () => {
-    const cached = await caches.match(event.request);
-    if (cached) return cached;
-    try {
-      const response = await fetch(event.request);
-      if (response && response.ok && new URL(event.request.url).protocol.startsWith('http')) {
-        const cache = await caches.open(CACHE_NAME);
-        cache.put(event.request, response.clone());
-      }
-      return response;
-    } catch (error) {
-      if (event.request.mode === 'navigate') {
-        return caches.match('./index.html');
-      }
-      throw error;
-    }
-  })());
+  const url = new URL(event.request.url);
+  const path = url.pathname;
+  const shouldNetworkFirst = event.request.mode === 'navigate' ||
+    path.endsWith('/index.html') ||
+    path.endsWith('/js/app.js') ||
+    path.endsWith('/js/db.js') ||
+    path.endsWith('/manifest.webmanifest') ||
+    path.endsWith('/manifest.json');
+  event.respondWith(shouldNetworkFirst ? networkFirst(event.request) : cacheFirst(event.request));
 });
