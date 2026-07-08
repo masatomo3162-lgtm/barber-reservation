@@ -398,7 +398,7 @@ function initCalendar() {
       const res = await getAllReservations();
       success(res.map(r => ({
         id: String(r.id),
-        title: r.menus[0] || '',
+        title: (r.menus || [])[0] || '',
         start: `${r.date}T${r.startTime}`,
         end: calcEndISO(r.date, r.startTime, r.duration+INTERVAL),
         backgroundColor: safeColor(r.color),
@@ -1353,6 +1353,8 @@ function showSection(id, btn) {
 function closeModal(id) {
   document.getElementById(id).classList.remove('open');
   if (id === 'customer-modal') reopenReservationAfterCustomer = false;
+  // 顧客詳細を閉じたら選択中IDを解除（次回の顧客登録で無関係な詳細が開くのを防ぐ）
+  if (id === 'customer-detail-modal') currentDetailCustomerId = null;
 }
 
 document.querySelectorAll('.modal-backdrop').forEach(bd => {
@@ -1360,6 +1362,7 @@ document.querySelectorAll('.modal-backdrop').forEach(bd => {
     if (e.target === bd) {
       bd.classList.remove('open');
       if (bd.id === 'customer-modal') reopenReservationAfterCustomer = false;
+      if (bd.id === 'customer-detail-modal') currentDetailCustomerId = null;
     }
   });
 });
@@ -1419,7 +1422,7 @@ async function exportFullBackup() {
     const stamp = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}`;
     const backup = {
       app: 'barber-reservation',
-      version: '1.0.2-ipad-fixed',
+      version: '1.0.3-ipad-fixed',
       exportedAt: now.toISOString(),
       counts: {
         reservations: reservations.length,
