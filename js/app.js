@@ -1334,8 +1334,26 @@ async function exportCustomersCSV() {
   showToast('顧客CSVをダウンロードしました');
 }
 
+function isIOSLikeDevice() {
+  const ua = navigator.userAgent || '';
+  // iPadOS 13以降はMacintoshと表示されることがあるため、タッチ点数も見る
+  return /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function normalizeMimeType(mimeType) {
+  return String(mimeType || 'text/plain').split(';')[0] || 'text/plain';
+}
+
 function downloadFile(content, filename, mimeType) {
   const blob = new Blob([content], {type: mimeType});
+
+  // iPad/iPhone Safari・ホーム画面PWAでは、Blobの自動ダウンロードが失敗して
+  // 画面が読み込み中のままになることがある。ユーザー操作のボタンから保存させる。
+  if (isIOSLikeDevice()) {
+    showIOSSaveDialog(content, filename, mimeType);
+    return;
+  }
+
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -1343,7 +1361,82 @@ function downloadFile(content, filename, mimeType) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  // Safari系では即時revokeでダウンロードがキャンセルされることがあるため遅らせる
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function showIOSSaveDialog(content, filename, mimeType) {
+  const old = document.getElementById('ios-save-dialog');
+  if (old) old.remove();
+
+  const cleanType = normalizeMimeType(mimeType);
+  const blob = new Blob([content], {type: cleanType});
+  const url = URL.createObjectURL(blob);
+  const file = new File([blob], filename, {type: cleanType});
+  const canShareFile = !!(navigator.canShare && navigator.share && navigator.canShare({ files: [file] }));
+
+  const backdrop = document.createElement('div');
+  backdrop.id = 'ios-save-dialog';
+  backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px;';
+
+  const card = document.createElement('div');
+  card.style.cssText = 'width:min(480px,100%);background:#fff;border-radius:22px;padding:20px;box-shadow:0 20px 45px rgba(0,0,0,.25);font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;color:#263238;';
+  card.innerHTML = `
+    <h3 style="margin:0 0 10px;font-size:18px;">iPad用ファイル保存</h3>
+    <p style="margin:0 0 12px;font-size:13px;line-height:1.7;color:#546e7a;">
+      iPadでは自動ダウンロードが止まることがあるため、この画面から保存してください。
+      ファイル名：<strong>${escapeHTML(filename)}</strong>
+    </p>
+    <div style="display:flex;flex-direction:column;gap:10px;margin:14px 0;">
+      ${canShareFile ? '<button type="button" id="ios-share-file-btn" class="btn btn-primary" style="width:100%;">共有メニューで保存</button>' : ''}
+      <a id="ios-open-file-link" href="${url}" download="${escapeHTML(filename)}" target="_blank" rel="noopener" class="btn btn-success" style="display:block;text-align:center;text-decoration:none;">ファイルを開く / 保存</a>
+      <button type="button" id="ios-copy-file-btn" class="btn" style="width:100%;background:#eceff1;color:#263238;">内容をコピー</button>
+    </div>
+    <p style="margin:0 0 14px;font-size:12px;line-height:1.7;color:#78909c;">
+      「共有メニューで保存」が使える場合は、そこから「ファイルに保存」を選んでください。
+      開いた場合は、共有ボタンから「ファイルに保存」を選べます。
+    </p>
+    <button type="button" id="ios-save-close-btn" class="btn btn-sm" style="width:100%;background:#b0bec5;color:#fff;">閉じる</button>
+  `;
+
+  backdrop.appendChild(card);
+  document.body.appendChild(backdrop);
+
+  const cleanup = () => {
+    URL.revokeObjectURL(url);
+    backdrop.remove();
+  };
+
+  const shareBtn = document.getElementById('ios-share-file-btn');
+  if (shareBtn) {
+    shareBtn.addEventListener('click', async () => {
+      try {
+        await navigator.share({ files: [file], title: filename });
+        showToast('共有メニューを開きました');
+      } catch (error) {
+        if (error && error.name !== 'AbortError') {
+          alert('共有メニューを開けませんでした。「ファイルを開く / 保存」を試してください。');
+        }
+      }
+    });
+  }
+
+  const copyBtn = document.getElementById('ios-copy-file-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(content);
+        showToast('バックアップ内容をコピーしました');
+      } catch (error) {
+        alert('コピーできませんでした。「ファイルを開く / 保存」を試してください。');
+      }
+    });
+  }
+
+  document.getElementById('ios-save-close-btn').addEventListener('click', cleanup);
+  backdrop.addEventListener('click', (event) => {
+    if (event.target === backdrop) cleanup();
+  });
 }
 
 // --- 予約CSV インポート ---
@@ -1541,7 +1634,7 @@ async function exportFullBackup() {
     const stamp = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}`;
     const backup = {
       app: 'barber-reservation',
-      version: '1.0.4-two-person-booking',
+      version: '1.0.5-ipad-backup-fix',
       exportedAt: now.toISOString(),
       counts: {
         reservations: reservations.length,

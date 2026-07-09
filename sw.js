@@ -1,4 +1,4 @@
-const CACHE_NAME = 'barber-app-v1.0.4-20260709a';
+const CACHE_NAME = 'barber-app-v1.0.5-20260709a';
 const LOCAL_ASSETS = [
   './',
   './index.html',
@@ -52,7 +52,7 @@ self.addEventListener('activate', (event) => {
 async function networkFirst(request) {
   const cache = await caches.open(CACHE_NAME);
   try {
-    const response = await fetch(request, { cache: 'no-cache' });
+    const response = await fetch(request, { cache: 'reload' });
     if (response && response.ok) await cache.put(request, response.clone());
     return response;
   } catch (error) {
