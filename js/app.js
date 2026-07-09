@@ -4,6 +4,7 @@ const START_HOUR = 8;
 const END_HOUR   = 19;
 const PX_PER_MIN = 3;
 const INTERVAL   = 5;
+const MAX_CONCURRENT_RESERVATIONS = 2; // 同じ時間帯に受けられる予約数（本人＋手伝い1名）
 
 const MENUS = [
   { key:'cut',      label:'カット',      time:25  },
@@ -166,18 +167,150 @@ function reservationStartDate(r) {
   return new Date(`${r.date}T${time}:00`);
 }
 
-async function findReservationConflict(date, startTime, duration, ignoreId = null) {
+function getReservationInterval(r) {
+  if (!r || !/^\d{2}:\d{2}$/.test(r.startTime || '')) return null;
+  const s = timeToMin(r.startTime);
+  const duration = Number(r.duration) || 0;
+  if (!Number.isFinite(s) || duration <= 0) return null;
+  return { id: r.id, reservation: r, s, e: s + duration + INTERVAL };
+}
+
+function intervalsOverlap(a, b) {
+  return a.s < b.e && a.e > b.s;
+}
+
+function mergeSegments(segments) {
+  const sorted = segments
+    .filter(seg => Number.isFinite(seg.s) && Number.isFinite(seg.e) && seg.e > seg.s)
+    .sort((a, b) => a.s - b.s || a.e - b.e);
+  const merged = [];
+  for (const seg of sorted) {
+    const last = merged[merged.length - 1];
+    if (last && seg.s <= last.e) {
+      last.e = Math.max(last.e, seg.e);
+    } else {
+      merged.push({ s: seg.s, e: seg.e });
+    }
+  }
+  return merged;
+}
+
+function computeAvailableSlots(dayReservations, openStart, openEnd) {
+  const intervals = dayReservations
+    .map(getReservationInterval)
+    .filter(Boolean)
+    .filter(it => it.e > openStart && it.s < openEnd);
+
+  if (!intervals.length) return [{ s: openStart, e: openEnd }];
+
+  const points = [openStart, openEnd];
+  intervals.forEach(it => {
+    points.push(Math.max(openStart, it.s));
+    points.push(Math.min(openEnd, it.e));
+  });
+  const sortedPoints = Array.from(new Set(points))
+    .filter(v => Number.isFinite(v))
+    .sort((a, b) => a - b);
+
+  const available = [];
+  for (let i = 0; i < sortedPoints.length - 1; i++) {
+    const s = sortedPoints[i];
+    const e = sortedPoints[i + 1];
+    if (e <= s) continue;
+    const used = intervals.filter(it => it.s < e && it.e > s).length;
+    if (used < MAX_CONCURRENT_RESERVATIONS) available.push({ s, e });
+  }
+  return mergeSegments(available);
+}
+
+function getReservationDisplayLayout(dayReservations) {
+  const intervals = dayReservations
+    .map(getReservationInterval)
+    .filter(Boolean)
+    .sort((a, b) => a.s - b.s || a.e - b.e);
+  const layout = {};
+  intervals.forEach(it => { layout[it.id] = { lane: 0, parallel: false }; });
+
+  for (let i = 0; i < intervals.length; i++) {
+    for (let j = i + 1; j < intervals.length; j++) {
+      if (intervals[j].s >= intervals[i].e) break;
+      if (intervalsOverlap(intervals[i], intervals[j])) {
+        layout[intervals[i].id].parallel = true;
+        layout[intervals[j].id].parallel = true;
+      }
+    }
+  }
+
+  const laneEnds = Array(MAX_CONCURRENT_RESERVATIONS).fill(-Infinity);
+  intervals.forEach(it => {
+    let lane = laneEnds.findIndex(end => it.s >= end);
+    if (lane === -1) {
+      lane = laneEnds.indexOf(Math.min(...laneEnds));
+    }
+    layout[it.id].lane = lane;
+    laneEnds[lane] = Math.max(laneEnds[lane], it.e);
+  });
+  return layout;
+}
+
+async function getReservationCapacityStatus(date, startTime, duration, ignoreId = null) {
   const start = timeToMin(startTime);
   const end = start + duration + INTERVAL;
-  if (!Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) return null;
+  if (!Number.isFinite(start) || !Number.isFinite(duration) || duration <= 0) {
+    return { allowed: true, maxOverlap: 0, conflicts: [], conflictAt: null };
+  }
+
   const reservations = await getAllReservations();
-  return reservations.find(r => {
-    if (r.date !== date || r.id === ignoreId) return false;
-    const otherStart = timeToMin(r.startTime);
-    const otherDuration = Number(r.duration) || 0;
-    const otherEnd = otherStart + otherDuration + INTERVAL;
-    return Number.isFinite(otherStart) && start < otherEnd && end > otherStart;
-  }) || null;
+  const candidate = { s: start, e: end };
+  const overlaps = reservations
+    .filter(r => r.date === date && r.id !== ignoreId)
+    .map(getReservationInterval)
+    .filter(Boolean)
+    .filter(it => intervalsOverlap(candidate, it));
+
+  if (!overlaps.length) {
+    return { allowed: true, maxOverlap: 0, conflicts: [], conflictAt: null };
+  }
+
+  const points = [start, end];
+  overlaps.forEach(it => {
+    points.push(Math.max(start, it.s));
+    points.push(Math.min(end, it.e));
+  });
+  const sortedPoints = Array.from(new Set(points))
+    .filter(v => Number.isFinite(v))
+    .sort((a, b) => a - b);
+
+  let maxOverlap = 0;
+  let conflicts = [];
+  let conflictAt = null;
+  for (let i = 0; i < sortedPoints.length - 1; i++) {
+    const segStart = sortedPoints[i];
+    const segEnd = sortedPoints[i + 1];
+    if (segEnd <= segStart) continue;
+    const active = overlaps.filter(it => it.s < segEnd && it.e > segStart);
+    maxOverlap = Math.max(maxOverlap, active.length);
+    if (active.length >= MAX_CONCURRENT_RESERVATIONS) {
+      conflicts = active;
+      conflictAt = segStart;
+      break;
+    }
+  }
+
+  return {
+    allowed: conflictAt === null,
+    maxOverlap,
+    conflicts: conflicts.map(it => it.reservation),
+    conflictAt,
+  };
+}
+
+async function findReservationConflict(date, startTime, duration, ignoreId = null) {
+  const status = await getReservationCapacityStatus(date, startTime, duration, ignoreId);
+  if (status.allowed) return null;
+  const first = status.conflicts[0] || null;
+  if (first) return first;
+  return { startTime: status.conflictAt !== null ? minToTime(status.conflictAt) : startTime };
 }
 
 function refreshCalendar() {
@@ -206,28 +339,14 @@ async function renderFreeSlots() {
     return;
   }
 
-  const busy = dayRes.map(r => {
-    const s = timeToMin(r.startTime);
-    return { s, e: s + (Number(r.duration) || 0) + INTERVAL };
-  }).filter(b => b.e > effectiveStart && b.s < OPEN_END)
-    .sort((a, b) => a.s - b.s);
-
-  const free = [];
-  let cursor = effectiveStart;
-  for (const b of busy) {
-    const blockStart = Math.max(b.s, effectiveStart);
-    if (cursor < blockStart) free.push({ s: cursor, e: blockStart });
-    cursor = Math.max(cursor, b.e);
-  }
-  if (cursor < OPEN_END) free.push({ s: cursor, e: OPEN_END });
-
-  const shown = free.filter(f => f.e - f.s >= 5); // 5分未満は表示しない
+  const shown = computeAvailableSlots(dayRes, effectiveStart, OPEN_END)
+    .filter(f => f.e - f.s >= 5); // 5分未満は表示しない
   if (!shown.length) {
-    el.innerHTML = '<span class="free-empty">本日の空き時間はありません</span>';
+    el.innerHTML = '<span class="free-empty">本日の予約枠は満枠です</span>';
     return;
   }
   el.innerHTML = '<div class="free-chips">' + shown.map(f =>
-    `<span class="free-chip">${minToTime(f.s)}〜${minToTime(f.e)}</span>`
+    `<span class="free-chip">空き枠 ${minToTime(f.s)}〜${minToTime(f.e)}</span>`
   ).join('') + '</div>';
 }
 
@@ -467,25 +586,11 @@ async function renderTimeline(date) {
     .filter(r => r.date === date)
     .sort((a,b) => a.startTime.localeCompare(b.startTime));
 
-  // ===== 空き時間バー（9:00〜18:00）=====
+  // ===== 空き時間バー（9:00〜19:00）=====
   const OPEN_START = (9  - START_HOUR) * 60;  // 9:00 → min from START_HOUR
   const OPEN_END   = (19 - START_HOUR) * 60;  // 19:00
-  // 予約のブロック（施術+インターバル）をリスト化
-  const busySlots = dayRes.map(r => {
-    const s = timeToMin(r.startTime);
-    return { s, e: s + r.duration + INTERVAL };
-  });
-  // 空き時間を算出
-  const freeSlots = [];
-  let cursor = OPEN_START;
-  const sortedBusy = busySlots.filter(b => b.e > OPEN_START && b.s < OPEN_END)
-    .sort((a,b) => a.s - b.s);
-  for (const b of sortedBusy) {
-    const blockStart = Math.max(b.s, OPEN_START);
-    if (cursor < blockStart) freeSlots.push({ s: cursor, e: blockStart });
-    cursor = Math.max(cursor, b.e);
-  }
-  if (cursor < OPEN_END) freeSlots.push({ s: cursor, e: OPEN_END });
+  // 空き時間を算出（2名同時予約対応：2枠とも埋まっている時間だけを満枠扱い）
+  const freeSlots = computeAvailableSlots(dayRes, OPEN_START, OPEN_END);
 
   // 空き時間バーを描画
   freeSlots.forEach(slot => {
@@ -498,10 +603,12 @@ async function renderTimeline(date) {
     const label = document.createElement('div');
     label.className = 'free-slot-label';
     const dur = slot.e - slot.s;
-    label.textContent = dur >= 15 ? `空き ${minToTime(slot.s)}〜${minToTime(slot.e)}（${dur}分）` : '';
+    label.textContent = dur >= 15 ? `空き枠 ${minToTime(slot.s)}〜${minToTime(slot.e)}（${dur}分）` : '';
     bar.appendChild(label);
     resArea.appendChild(bar);
   });
+
+  const timelineLayout = getReservationDisplayLayout(dayRes);
 
   dayRes
     .forEach(r => {
@@ -515,7 +622,11 @@ async function renderTimeline(date) {
       const block = document.createElement('div');
       block.className = 'res-block';
       block.dataset.id = r.id;
-      block.style.cssText = `top:${top}px;height:${height}px;background:${safeColor(r.color)};color:#fff;border-left-color:rgba(0,0,0,0.28);`;
+      const layout = timelineLayout[r.id] || { lane: 0, parallel: false };
+      const laneStyle = layout.parallel
+        ? (layout.lane === 0 ? 'left:4px;right:calc(50% + 2px);' : 'left:calc(50% + 2px);right:4px;')
+        : 'left:4px;right:4px;';
+      block.style.cssText = `top:${top}px;height:${height}px;${laneStyle}background:${safeColor(r.color)};color:#fff;border-left-color:rgba(0,0,0,0.28);`;
       block.innerHTML = `
         <div class="res-block-name">${escapeHTML(cust ? cust.name : '顧客不明')}</div>
         <div class="res-block-menu">${escapeHTML((r.menus || []).join('・'))}</div>
@@ -590,7 +701,7 @@ async function renderTimeline(date) {
     const newStartTime = minToTime(clamped);
     const conflict = await findReservationConflict(dateForMove, newStartTime, Number(res.duration) || 0, id);
     if (conflict) {
-      alert(`その時間には別の予約があります（${conflict.startTime}開始）。`);
+      alert(`その時間帯は2名分の予約が埋まっています（${conflict.startTime}開始の予約あり）。`);
       await renderTimeline(dateForMove);
       return;
     }
@@ -800,10 +911,18 @@ async function onStartTimeChange() {
     return;
   }
   if (total > 0) {
-    const conflict = await findReservationConflict(date, el.value, total, editId);
-    if (conflict) {
-      hint.textContent = `⚠ ${conflict.startTime} 開始の予約と重なっています`;
+    const status = await getReservationCapacityStatus(date, el.value, total, editId);
+    if (!status.allowed) {
+      const conflictText = status.conflicts.length
+        ? status.conflicts.map(r => r.startTime).join('・')
+        : minToTime(status.conflictAt);
+      hint.textContent = `⚠ その時間帯は2名分の予約が埋まっています（${conflictText} 開始の予約あり）`;
       hint.className = 'time-hint warn';
+      return;
+    }
+    if (status.maxOverlap === 1) {
+      hint.textContent = `✓ 同時予約2枠目として登録できます`;
+      hint.className = 'time-hint ok';
       return;
     }
   }
@@ -840,7 +959,7 @@ async function handleReservationSubmit(e) {
   const date = existing ? existing.date : selectedDate;
   const conflict = await findReservationConflict(date, startTime, total, id);
   if (conflict) {
-    alert(`その時間には別の予約があります（${conflict.startTime}開始）。`);
+    alert(`その時間帯は2名分の予約が埋まっています（${conflict.startTime}開始の予約あり）。`);
     return;
   }
 
@@ -1422,7 +1541,7 @@ async function exportFullBackup() {
     const stamp = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}`;
     const backup = {
       app: 'barber-reservation',
-      version: '1.0.3-ipad-fixed',
+      version: '1.0.4-two-person-booking',
       exportedAt: now.toISOString(),
       counts: {
         reservations: reservations.length,

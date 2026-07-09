@@ -1,4 +1,4 @@
-const CACHE_NAME = 'barber-app-v1.0.3-20260708a';
+const CACHE_NAME = 'barber-app-v1.0.4-20260709a';
 const LOCAL_ASSETS = [
   './',
   './index.html',
