@@ -195,32 +195,47 @@ function mergeSegments(segments) {
   return merged;
 }
 
-function computeAvailableSlots(dayReservations, openStart, openEnd) {
-  const intervals = dayReservations
-    .map(getReservationInterval)
-    .filter(Boolean)
-    .filter(it => it.e > openStart && it.s < openEnd);
+// ===== 空き枠計算（v1.1.0で役割を分離）=====
+// ・computeFullyFreeSlots … 画面に表示する「予約が1件も入っていない連続時間」を計算する（表示専用）
+// ・getReservationCapacityStatus … 同じ時間帯に最大2件まで予約できるかを判定する（登録・移動の可否専用）
+// 表示用の空き枠では、予約終了時刻 = 開始時刻 + duration とし、5分インターバルは加えない。
+// インターバル（INTERVAL）は従来どおり同時予約の可否判定側でのみ使用する。
 
-  if (!intervals.length) return [{ s: openStart, e: openEnd }];
+// 表示用：予約が占有する時間帯（インターバルを含めない）
+function getReservationBusySegment(r) {
+  if (!r || !/^\d{2}:\d{2}$/.test(r.startTime || '')) return null;
+  const s = timeToMin(r.startTime);
+  const duration = Number(r.duration) || 0;
+  if (!Number.isFinite(s) || duration <= 0) return null;
+  return { s, e: s + duration };
+}
 
-  const points = [openStart, openEnd];
-  intervals.forEach(it => {
-    points.push(Math.max(openStart, it.s));
-    points.push(Math.min(openEnd, it.e));
-  });
-  const sortedPoints = Array.from(new Set(points))
-    .filter(v => Number.isFinite(v))
-    .sort((a, b) => a - b);
+// 表示用：営業時間のうち「予約が1件も入っていない」連続した空き時間を返す
+function computeFullyFreeSlots(dayReservations, openStart, openEnd) {
+  if (!Number.isFinite(openStart) || !Number.isFinite(openEnd) || openEnd <= openStart) return [];
 
-  const available = [];
-  for (let i = 0; i < sortedPoints.length - 1; i++) {
-    const s = sortedPoints[i];
-    const e = sortedPoints[i + 1];
-    if (e <= s) continue;
-    const used = intervals.filter(it => it.s < e && it.e > s).length;
-    if (used < MAX_CONCURRENT_RESERVATIONS) available.push({ s, e });
+  // 予約の占有時間（1件でも入っていれば「空きではない」）をまとめる
+  const busy = mergeSegments(
+    (dayReservations || [])
+      .map(getReservationBusySegment)
+      .filter(Boolean)
+      .map(seg => ({ s: Math.max(openStart, seg.s), e: Math.min(openEnd, seg.e) }))
+      .filter(seg => seg.e > seg.s)
+  );
+
+  if (!busy.length) return [{ s: openStart, e: openEnd }];
+
+  // 営業時間から占有時間を引き算して空き枠を作る
+  const free = [];
+  let cursor = openStart;
+  for (const seg of busy) {
+    if (seg.s > cursor) free.push({ s: cursor, e: seg.s });
+    cursor = Math.max(cursor, seg.e);
   }
-  return mergeSegments(available);
+  if (cursor < openEnd) free.push({ s: cursor, e: openEnd });
+
+  // 0分・マイナスの枠は返さない
+  return free.filter(f => f.e - f.s > 0);
 }
 
 function getReservationDisplayLayout(dayReservations) {
@@ -339,14 +354,15 @@ async function renderFreeSlots() {
     return;
   }
 
-  const shown = computeAvailableSlots(dayRes, effectiveStart, OPEN_END)
+  // 日別タイムスケジュールと同じ計算ルール（予約が1件も入っていない時間のみ空き枠）
+  const shown = computeFullyFreeSlots(dayRes, effectiveStart, OPEN_END)
     .filter(f => f.e - f.s >= 5); // 5分未満は表示しない
   if (!shown.length) {
-    el.innerHTML = '<span class="free-empty">本日の予約枠は満枠です</span>';
+    el.innerHTML = '<span class="free-empty">本日の完全な空き時間はありません</span>';
     return;
   }
   el.innerHTML = '<div class="free-chips">' + shown.map(f =>
-    `<span class="free-chip">空き枠 ${minToTime(f.s)}〜${minToTime(f.e)}</span>`
+    `<span class="free-chip">空き枠 ${minToTime(f.s)}〜${minToTime(f.e)}（${f.e - f.s}分）</span>`
   ).join('') + '</div>';
 }
 
@@ -589,21 +605,23 @@ async function renderTimeline(date) {
   // ===== 空き時間バー（9:00〜19:00）=====
   const OPEN_START = (9  - START_HOUR) * 60;  // 9:00 → min from START_HOUR
   const OPEN_END   = (19 - START_HOUR) * 60;  // 19:00
-  // 空き時間を算出（2名同時予約対応：2枠とも埋まっている時間だけを満枠扱い）
-  const freeSlots = computeAvailableSlots(dayRes, OPEN_START, OPEN_END);
+  // 空き時間を算出（予約が1件も入っていない連続時間のみを空き枠として表示）
+  // ※同時予約2枠の可否判定は getReservationCapacityStatus 側で従来どおり行う
+  const freeSlots = computeFullyFreeSlots(dayRes, OPEN_START, OPEN_END);
 
   // 空き時間バーを描画
   freeSlots.forEach(slot => {
+    const dur = slot.e - slot.s;
+    if (dur <= 0) return; // 0分・マイナスの枠は描画しない
     const top    = minToPx(slot.s);
-    const height = minToPx(slot.e - slot.s);
+    const height = minToPx(dur);
     if (height < 1) return;
     const bar = document.createElement('div');
     bar.className = 'free-slot';
     bar.style.cssText = `top:${top}px;height:${height}px;`;
     const label = document.createElement('div');
     label.className = 'free-slot-label';
-    const dur = slot.e - slot.s;
-    label.textContent = dur >= 15 ? `空き枠 ${minToTime(slot.s)}〜${minToTime(slot.e)}（${dur}分）` : '';
+    label.textContent = `空き枠 ${minToTime(slot.s)}〜${minToTime(slot.e)}（${dur}分）`;
     bar.appendChild(label);
     resArea.appendChild(bar);
   });
@@ -803,10 +821,34 @@ async function editReservation(id) {
 }
 
 // ===== 顧客選択（検索式）=====
+// 全角英数字を半角に寄せる（例：０９０ → 090）
+function toHalfWidthAlnum(s) {
+  return String(s || '').replace(/[\uff10-\uff19\uff21-\uff3a\uff41-\uff5a]/g, ch =>
+    String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+}
+
 function normalizeKana(s) {
   // カタカナをひらがなに寄せて検索しやすくする（漢字の読みまではデータが無いので対象外）
-  return String(s || '').toLowerCase().replace(/[\u30a1-\u30f6]/g, ch =>
+  // 全角英数字も半角化して、名前に含まれる数字・英字の表記ゆれを吸収する
+  return toHalfWidthAlnum(String(s || '')).toLowerCase().replace(/[\u30a1-\u30f6]/g, ch =>
     String.fromCharCode(ch.charCodeAt(0) - 0x60));
+}
+
+// 電話番号検索用：全角数字を半角化し、数字以外（ハイフン・空白・括弧など）をすべて除去する
+function normalizePhone(s) {
+  return toHalfWidthAlnum(String(s || '')).replace(/[^0-9]/g, '');
+}
+
+// 名前（部分一致・かな正規化）または電話番号（部分一致・数字のみ比較）で顧客を判定する
+// 新規予約・予約編集の顧客検索と、顧客管理画面の検索の両方で同じ判定を使う
+function customerMatchesQuery(customer, rawQuery) {
+  const raw = String(rawQuery || '').trim();
+  if (!raw) return true;
+  const nameQuery = normalizeKana(raw);
+  if (nameQuery && normalizeKana(customer.name).includes(nameQuery)) return true;
+  const phoneQuery = normalizePhone(raw);
+  if (phoneQuery && normalizePhone(customer.phone).includes(phoneQuery)) return true;
+  return false;
 }
 
 async function setSelectedCustomer(customerId) {
@@ -837,19 +879,16 @@ async function onCustSearchInput() {
   const searchEl = document.getElementById('res-cust-search');
   const suggest = document.getElementById('res-cust-suggest');
   const raw = searchEl.value.trim();
-  const q = normalizeKana(raw);
   const customers = await getAllCustomers();
 
   if (!customers.length) {
-    suggest.innerHTML = '<div class="cust-suggest-empty">顧客が登録されていません</div>';
+    suggest.innerHTML = '<div class="cust-suggest-empty">顧客が登録されていません。「＋ 新規顧客登録」から追加してください</div>';
     suggest.classList.add('open');
     return;
   }
-  const matches = !q
+  const matches = !raw
     ? customers.slice(0, 30)
-    : customers.filter(c =>
-        normalizeKana(c.name).includes(q) ||
-        normalizeKana(c.phone).includes(q));
+    : customers.filter(c => customerMatchesQuery(c, raw));
 
   if (!matches.length) {
     suggest.innerHTML = '<div class="cust-suggest-empty">該当する顧客がいません</div>';
@@ -858,7 +897,7 @@ async function onCustSearchInput() {
   }
   suggest.innerHTML = matches.map(c =>
     `<div class="cust-suggest-item" onclick="selectCustomerFromSuggest(${c.id})">
-      ${escapeHTML(c.name)}${c.phone ? `<span class="cs-phone">${escapeHTML(c.phone)}</span>` : ''}
+      ${escapeHTML(c.name)}<span class="cs-phone">${c.phone ? escapeHTML(c.phone) : '電話番号なし'}</span>
     </div>`
   ).join('');
   suggest.classList.add('open');
@@ -998,12 +1037,10 @@ async function renderCustomers(filter='') {
   const reservations = await getAllReservations();
   const list = document.getElementById('customer-list');
   const now = new Date();
-  const normalizedFilter = String(filter || '').toLowerCase();
   list.innerHTML = '';
 
   customers
-    .filter(c => String(c.name || '').toLowerCase().includes(normalizedFilter) ||
-      String(c.phone || '').toLowerCase().includes(normalizedFilter))
+    .filter(c => customerMatchesQuery(c, filter))
     .forEach(c => {
       const hist = reservations
         .filter(r => r.customerId === c.id && reservationStartDate(r) <= now)
@@ -1634,7 +1671,7 @@ async function exportFullBackup() {
     const stamp = `${now.getFullYear()}${pad2(now.getMonth()+1)}${pad2(now.getDate())}_${pad2(now.getHours())}${pad2(now.getMinutes())}`;
     const backup = {
       app: 'barber-reservation',
-      version: '1.0.5-ipad-backup-fix',
+      version: '1.1.0',
       exportedAt: now.toISOString(),
       counts: {
         reservations: reservations.length,

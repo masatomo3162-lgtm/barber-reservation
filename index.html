@@ -3,14 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>理容室予約管理 v1.0.5</title>
+<title>理容室予約管理 v1.1.0</title>
 <!-- App icons / PWA（シンプルアイコン） -->
 <link rel="icon" href="./favicon.ico" sizes="any">
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="./favicon-16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
-<link rel="manifest" href="./manifest.webmanifest?v=20260709a">
+<link rel="manifest" href="./manifest.webmanifest?v=20260726b">
 <meta name="theme-color" content="#0C394C">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -526,7 +526,17 @@ tr:hover td { background: var(--accent-light); }
     </div>
     <div class="card">
       <h3>アプリ情報</h3>
-      <p style="margin-bottom:14px;">バージョン <strong>1.0.5 iPadバックアップ修正版</strong></p>
+      <p style="margin-bottom:14px;">バージョン <strong>1.1.0</strong></p>
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Ver1.1.0 更新内容</div>
+      <ul style="margin:0 0 12px 18px;font-size:12px;color:var(--muted);line-height:1.9;">
+        <li>新規予約・予約編集画面の顧客検索を名前・電話番号検索に対応</li>
+        <li>電話番号のハイフンや空白を除外して検索できるよう改善</li>
+        <li>タイムスケジュールの空き枠が予約前後に分割されない不具合を修正</li>
+        <li>予約と予約の間の空き時間を分数付きで表示</li>
+        <li>ダッシュボードと日別タイムスケジュールの空き枠計算を統一</li>
+        <li>空き枠表示と同時予約可能数の計算処理を分離</li>
+        <li>全体的なバグチェックを実施</li>
+      </ul>
       <div style="font-weight:700;font-size:13px;margin-bottom:8px;">Ver1.0.5 更新内容</div>
       <ul style="margin:0 0 12px 18px;font-size:12px;color:var(--muted);line-height:1.9;">
         <li>iPad/Safariで一括バックアップ保存時に読み込み中のまま止まることがある問題を修正</li>
@@ -687,11 +697,11 @@ tr:hover td { background: var(--accent-light); }
 <div class="drag-indicator" id="drag-indicator"></div>
 <div class="toast" id="toast"></div>
 
-<script src="js/db.js?v=20260709a"></script>
-<script src="js/app.js?v=20260709a"></script>
+<script src="js/db.js?v=20260726b"></script>
+<script src="js/app.js?v=20260726b"></script>
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js?v=20260709a', { scope: './' }));
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js?v=20260726b', { scope: './' }));
   }
 </script>
 </body>
